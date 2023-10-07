@@ -9,7 +9,7 @@
 # Distributed under terms of the MIT license.
 # Available at setup time due to pyproject.toml
 
-from pybind11.setup_helpers import Pybind11Extension, build_ext
+# from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import setup
 
 __version__ = "0.5.1"
@@ -23,13 +23,13 @@ __version__ = "0.5.1"
 #   Sort input source files if you glob sources to ensure bit-for-bit
 #   reproducible builds (https://github.com/pybind/python_example/pull/53)
 
-ext_modules = [
-    Pybind11Extension(
-        "concepts._C",
-        ["concepts/cc/main.cc"],
-        define_macros=[('VERSION_INFO', __version__)],
-    ),
-]
+# ext_modules = [
+#     Pybind11Extension(
+#         "concepts._C",
+#         ["concepts/cc/main.cc"],
+#         define_macros=[('VERSION_INFO', __version__)],
+#     ),
+# ]
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -56,7 +56,7 @@ setup(
     url="https://concepts.jiayuanm.com",
     description="Concepts",
     long_description=long_description,
-    ext_modules=ext_modules,
+    # ext_modules=ext_modules,
     license='MIT',
     classifiers=[
         'Development Status :: 3 - Alpha',
