@@ -31,18 +31,44 @@ ext_modules = [
     ),
 ]
 
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
+
+requirements = [
+    'six',
+    'Cython',
+    'pkgconfig',
+    'ipdb',
+    'tabulate',
+    'numpy',
+    'scipy',
+    'matplotlib',
+    'torch',
+    'torchvision',
+]
+
 setup(
     name="concepts",
     version=__version__,
     author="Jiayuan Mao",
     author_email="maojiayuan@gmail.com",
+    install_requires=requirements,
     url="https://concepts.jiayuanm.com",
     description="Concepts",
-    long_description="",
+    long_description=long_description,
     ext_modules=ext_modules,
+    license='MIT',
+    classifiers=[
+        'Development Status :: 3 - Alpha',
+        'Intended Audience :: Science/Research',
+        'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3.10',
+    ],
     # Currently, build_ext only provides an optional "highest supported C++
     # level" feature, but in the future it may provide more features.
     cmdclass={"build_ext": build_ext},
+    packages=['concepts'],
+    package_data={},
     zip_safe=False,
     python_requires=">=3.10",
 )
