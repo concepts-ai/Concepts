@@ -45,6 +45,10 @@ requirements = [
     'matplotlib',
     'torch',
     'torchvision',
+    'tqdm',
+    'lark',
+    'nltk',
+    'Pillow',
 ]
 
 setup(
