@@ -1,0 +1,124 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : pds-highlight
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 02/04/2022
+#
+# This file is part of HACL-PyTorch.
+# Distributed under terms of the MIT license.
+
+import os
+import os.path as osp
+import sys
+import tempfile
+import jacinle
+
+logger = jacinle.get_logger(__file__)
+parser = jacinle.JacArgumentParser()
+parser.add_argument('inputfile', type='checked_file', help='Input pdsketch file')
+args = parser.parse_args()
+args.outputfile = osp.join(tempfile.gettempdir(), 'pds-highlight.html')
+
+
+def color(r, g, b):
+    return '#' + str(hex(r))[2:].zfill(2) + str(hex(g))[2:].zfill(2) + str(hex(b)[2:].zfill(2))
+
+
+styles = {
+    0: '#c24f1a',  # orange
+    1: '#c24f1a',  # orange
+    2: '#304b22',  # dark green
+    3: '#538135',  # green
+    4: color(230, 219, 116),  # light yellow
+    5: '#2e75b5',             # blue
+    6: color(60, 60, 60),
+}
+
+
+# Token style is a number.
+# style % 10 === its color
+# style // 10 === its weight (1 for bold)
+token_styles = {
+    "SCOPE_SEP": 0,
+    "COLON": 2,
+    "COMMA": 2,
+    "LBRACE": 5,
+    "LSQB": 5,
+    "RBRACE": 5,
+    "RSQB": 5,
+    "FALSE": 0,
+    "NULL": 0,
+    "TRUE": 0,
+    "STRING": 1,
+    "NUMBER": 1,
+    'ESCAPED_STRING': 1,
+    'SIGNED_NUMBER': 1,
+    'LPAR': 3,
+    'RPAR': 3,
+    'EQUAL': 3,
+    'SLOT': 11,
+    'CONSTANT': 6,
+    'VARIABLE': 16,
+    'EXISTS': 1,
+    'FORALL': 1,
+    'FOREACH': 1
+}
+
+for keyword in {
+    'IMPLIES',
+    'MINUS', 'EXPR', 'PLUS',
+    'EFFECT', 'ACTION', 'AXIOM', 'REQUIREMENTS', 'PARAMETERS', 'PREDICATES', 'INSTANTIATES', 'CONTROLLER',
+    'TYPES', 'DEFINE', 'DOMAIN', 'PROBLEM', 'PRECONDITION', 'FEATURE',
+    'OUTPUT', 'CONTEXT',
+    'VECTOR', 'IOTA',
+    'GENERATOR', 'CERTIFIES', 'DERIVED', 'GENERATES',
+    'OBJECTS', 'INIT', 'GOAL',
+    'MACRO', 'THEN',
+    '__ANON_0',  # ->
+    '__ANON_2'  # fancy-generator
+}:
+    token_styles[keyword] = 2
+
+
+def main():
+    sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
+    import concepts.pdsketch as pds
+
+    parser = pds.PDSketchParser()
+    with open(args.inputfile) as f:
+        string = f.read()
+    tokens = list(parser.lark.lex(string))
+
+    other_types = set()
+    with open(args.outputfile, 'w') as f:
+        f.write(f'<title>{args.inputfile}</title>')
+        f.write(f'<body style="background: {color(255,255,255)}; font-family: Courier"><div>')
+        last_index = 0
+        for token in tokens:
+            if token.start_pos > last_index:
+                this_string = string[last_index:token.start_pos].replace(' ', '&nbsp;').replace("\n", "<br />")
+                f.write(f'<span style="color: {color(192,192,192)}">{this_string}</span>')
+
+            if token.type in token_styles:
+                style = token_styles[token.type]
+                if token.value in ('and', 'or', 'not'):
+                    style = 1
+                this_color = styles[style % 10]
+                weight_str = 'font-weight: 700' if style >= 10 else ''
+                f.write(f'<span data-type="{token.type}" style="color: {this_color}; {weight_str}">{token.value}</span>')
+            else:
+                other_types.add(token.type)
+                f.write(f'<span style="color:{color(60,60,60)}">{token.value}</span>')
+            last_index = token.start_pos + len(token.value)
+        f.write('</div>')
+
+    if len(other_types) > 0:
+        logger.warning('Unregistered token type: ' + ', '.join(list(other_types)))
+
+    os.system('open "' + args.outputfile + '"')
+
+
+if __name__ == '__main__':
+    main()
+

@@ -1,0 +1,11 @@
+Given a sentence, you need to output all the entities in the sentence and the relationship described in it. Be as comprehensive as possible. You need to use the following format:
+
+Given: A woman is playing the piano in the room.
+You should output:
+
+<object>woman</object>
+<object>piano</object>
+<object>room</object>
+<relation><subject>woman</subject><object>piano</piano><predicate>play</predicate></relation>
+<relation><subject>woman</subject><object>room</piano><predicate>in</predicate></relation>
+<relation><subject>piano</subject><object>room</piano><predicate>in</predicate></relation>
