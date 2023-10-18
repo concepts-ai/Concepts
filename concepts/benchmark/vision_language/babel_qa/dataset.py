@@ -15,21 +15,35 @@ import jacinle.io as io
 from jacinle.logging import get_logger
 from jacinle.utils.container import GView
 from jactorch.data.dataset import FilterableDatasetUnwrapped, FilterableDatasetView
+from jactorch.data.dataloader import JacDataLoader
+from jactorch.data.collate import VarLengthCollateV2
 
-from concepts.benchmark.humanmotion.utils import nsclseq_to_nscltree, nsclseq_to_nsclqsseq, nscltree_to_nsclqstree, program_to_nsclseq
+from concepts.benchmark.vision_language.babel_qa.utils import nsclseq_to_nscltree, nsclseq_to_nsclqsseq, nscltree_to_nsclqstree, program_to_nsclseq
 
 import numpy as np
 import math
 
 
-
 logger = get_logger(__file__)
 
-__all__ = ['NSTrajDataset', 'MotionClassificationDataset']
+__all__ = ['BabelQADataset', 'BabelMotionClassificationDataset']
 
 
-class NSTrajDatasetUnwrapped(FilterableDatasetUnwrapped):
-    def __init__(self, data_dir, data_split_file, split, data_source, no_gt_segments, filter_supervision, max_frames=150):
+class BabelQADatasetUnwrapped(FilterableDatasetUnwrapped):
+    """BabelQA dataset."""
+
+    def __init__(self, data_dir: str, data_split_file: str, split: str, data_source: str, no_gt_segments: bool, filter_supervision, max_frames: int = 150):
+        """Initialize BabelQA dataset.
+
+        Args:
+            data_dir: path to data directory.
+            data_split_file: path to the json file that contains the question ids for each split.
+            split: split to use.
+            data_source: data source to use. Either teach_synth or ???
+            no_gt_segments: whether to use ground truth segments or not.
+            filter_supervision: ???
+            max_frames: maximum number of frames to use per segment. (is this correct???)
+        """
         super().__init__()
 
         self.labels_json = osp.join(data_dir, 'motion_concepts.json')
@@ -168,18 +182,15 @@ class NSTrajDatasetUnwrapped(FilterableDatasetUnwrapped):
     def __len__(self):
         return len(self.split_question_ids)
 
-class NSTrajDatasetFilterableView(FilterableDatasetView):
+
+class BabelQADatasetFilterableView(FilterableDatasetView):
     def filter_questions(self, allowed):
         def filt(question):
             return question['query_type'] in allowed
 
         return self.filter(filt, 'filter-question-type[allowed={{{}}}]'.format(','.join(list(allowed))))
 
-
     def make_dataloader(self, batch_size, shuffle, drop_last, nr_workers):
-        from jactorch.data.dataloader import JacDataLoader
-        from jactorch.data.collate import VarLengthCollateV2
-
         collate_guide = {
             'joints': 'concat',
             'answer': 'skip',
@@ -196,13 +207,15 @@ class NSTrajDatasetFilterableView(FilterableDatasetView):
         return JacDataLoader(
             self, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last,
             num_workers=nr_workers, pin_memory=True,
-            collate_fn=VarLengthCollateV2(collate_guide))
+            collate_fn=VarLengthCollateV2(collate_guide)
+        )
 
 
-def NSTrajDataset(*args, **kwargs):
-    return NSTrajDatasetFilterableView(NSTrajDatasetUnwrapped(*args, **kwargs))
+def BabelQADataset(*args, **kwargs):
+    return BabelQADatasetFilterableView(BabelQADatasetUnwrapped(*args, **kwargs))
 
-class MotionClassificationDatasetUnwrapped(FilterableDatasetUnwrapped):
+
+class BabelMotionClassificationDatasetUnwrapped(FilterableDatasetUnwrapped):
     def __init__(self, labels_json, joints_root, symbolic, max_frames=150):
         super().__init__()
         self.labels_json = labels_json
@@ -263,7 +276,8 @@ class MotionClassificationDatasetUnwrapped(FilterableDatasetUnwrapped):
     def __len__(self):
         return len(self.babel_ids)
 
-class MotionClassificationDatsetFilterableView(FilterableDatasetView):
+
+class BabelMotionClassificationDatasetFilterableView(FilterableDatasetView):
     def make_dataloader(self, batch_size, shuffle, drop_last, nr_workers):
         from jactorch.data.dataloader import JacDataLoader
         from jactorch.data.collate import VarLengthCollateV2
@@ -273,15 +287,13 @@ class MotionClassificationDatsetFilterableView(FilterableDatasetView):
             'actions': 'skip',
         }
 
-        gdef.update_collate_guide(collate_guide)
-
         return JacDataLoader(
             self, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last,
             num_workers=nr_workers, pin_memory=True,
-            collate_fn=VarLengthCollateV2(collate_guide))
-
-def MotionClassificationDataset(*args, **kwargs):
-    return MotionClassificationDatsetFilterableView(MotionClassificationDatasetUnwrapped(*args, **kwargs))
+            collate_fn=VarLengthCollateV2(collate_guide)
+        )
 
 
+def BabelMotionClassificationDataset(*args, **kwargs):
+    return BabelMotionClassificationDatasetFilterableView(BabelMotionClassificationDatasetUnwrapped(*args, **kwargs))
 

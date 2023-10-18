@@ -373,7 +373,7 @@ class AtomicStripsDomain(object):
     """The predicates of the domain, as a dictionary from predicate name to :class:`~concepts.pdsketch.predicate.Predicate`."""
 
     operators: Dict[str, AtomicStripsOperator]
-    """The operators of the domain, as a dictionary from operator name to :class:`~concepts.pdsketch.strips.atomic_strips_domain.AtomicStripsOperator."""
+    """The operators of the domain, as a dictionary from operator name to :class:`~concepts.pdsketch.strips.atomic_strips_domain.AtomicStripsOperator`."""
 
     regression_rules: Dict[str, AtomicStripsRegressionRule]
     """The regression rules of the domain, as a dictionary from regression rule name to :class:`~concepts.pdsketch.strips.atomic_strips_domain.AtomicStripsRegressionRule`."""

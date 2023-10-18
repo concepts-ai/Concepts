@@ -72,17 +72,17 @@ class ImageBasedPCDSegmentationModel(object):
         """
 
         image = torch.tensor(image.transpose(2, 0, 1) / 255.0, dtype=torch.float32)
-        image= self.preprocess(image)
+        image = self.preprocess(image).to(self.device)
         pred = self.model([image])[0]
 
-        pred_score = list(pred['scores'].detach().numpy())
+        pred_score = list(pred['scores'].detach().cpu().numpy())
         pred_t = [pred_score.index(x) for x in pred_score if x > self.score_threshold][-1]
 
         masks = (pred['masks'] > 0.5).squeeze().detach().cpu().numpy()
-        pred_class = [COCO_INSTANCE_CATEGORY_NAMES[i] for i in list(pred['labels'].numpy())]
+        pred_class = [COCO_INSTANCE_CATEGORY_NAMES[i] for i in list(pred['labels'].detach().cpu().numpy())]
         pred_boxes = [
             ((int(i[0]), int(i[1])), (int(i[2]), int(i[3])))
-            for i in list(pred['boxes'].detach().numpy().astype(np.int64))
+            for i in list(pred['boxes'].detach().cpu().numpy().astype(np.int64))
         ]
 
         masks = masks[:pred_t+1]
@@ -92,7 +92,7 @@ class ImageBasedPCDSegmentationModel(object):
 
 
 class PointGuidedImageSegmentationModel(object):
-    def __init__(self, checkpoint_path, model='sam_default'):
+    def __init__(self, checkpoint_path, model: str = 'sam_default', device: str = 'cpu'):
         from segment_anything import SamPredictor, sam_model_registry
 
         if model == 'sam_default':
@@ -100,6 +100,8 @@ class PointGuidedImageSegmentationModel(object):
         else:
             raise ValueError('Unknown model name: {}.'.format(model))
         self.model = model(checkpoint=checkpoint_path)
+        self.device = torch.device(device)
+        self.model.to(self.device)
         self.predicator = SamPredictor(self.model)
         self.last_image_id = None
 

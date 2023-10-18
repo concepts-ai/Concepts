@@ -8,6 +8,8 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
+from typing import Optional
+
 import copy
 import numpy as np
 
@@ -19,7 +21,7 @@ __all__ = ['Graph', 'random_generate_graph', 'random_generate_graph_dnc', 'rando
 class Graph(object):
     """Store a graph using adjacency matrix."""
 
-    def __init__(self, nr_nodes, edges, coordinates=None):
+    def __init__(self, nr_nodes: int, edges: np.ndarray, coordinates: Optional[np.ndarray] = None):
         """Initialize a graph.
 
         Args:
@@ -35,23 +37,26 @@ class Graph(object):
         self.extra_info = {}
 
     def get_edges(self):
+        """Get the adjacency matrix of the graph. This function will return a copy of the adjacency matrix."""
         return copy.copy(self._edges)
 
-    def get_coordinates(self):
-        return self._coordinates
+    def get_coordinates(self) -> Optional[np.ndarray]:
+        """Get the coordinates of the nodes."""
+        return copy.copy(self._coordinates) if self._coordinates is not None else None
 
-    def get_relations(self):
+    def get_relations(self) -> np.ndarray:
         """Return edges and identity matrix."""
         return np.stack([self.get_edges(), np.eye(self._nr_nodes)], axis=-1)
 
-    def has_edge(self, x, y):
+    def has_edge(self, x, y) -> bool:
+        """Return whether there is an edge from node x to node y."""
         return self._edges[x, y] == 1
 
-    def get_out_degree(self):
+    def get_out_degree(self) -> int:
         """Return the out degree of each node."""
         return np.sum(self._edges, axis=1)
 
-    def get_shortest(self):
+    def get_shortest(self) -> np.ndarray:
         """Return the length of shortest path between nodes."""
         if self._shortest is not None:
             return self._shortest
@@ -75,13 +80,13 @@ class Graph(object):
         self._shortest = shortest
         return self._shortest
 
-    def get_connectivity(self, k=None, exclude_self=True):
+    def get_connectivity(self, k: Optional[int] = None, exclude_self: int = True):
         """Return the k-connectivity for each pair of nodes. It will return the full connectivity matrix if k is None or k < 0.
         When exclude_self is True, the diagonal elements will be 0.
 
         Args:
-            k: the k-connectivity. Default: ``None``(full connectivity).
-            exclude_self: exclude the diagonal elements. Default: ``True``.
+            k: the k-connectivity. Default: `None` (full connectivity).
+            exclude_self: exclude the diagonal elements. Default: `True`.
 
         Returns:
             conn: The connectivity matrix.
@@ -99,46 +104,16 @@ class Graph(object):
         return conn
 
 
-def random_generate_special_graph(n: int, graph_type: str, directed: bool = False) -> Graph:
-    """Randomly generate a special type graph.
-
-    For list graph, the nodes are randomly permuted and connected in order. If the graph is directed, the edges are
-    directed from the first node to the last node.
-
-    Args:
-        n: The number of nodes in the graph.
-        graph_type: The type of the graph, e.g. list, tree. Currently only support list.
-        directed: Directed or Undirected graph. Default: ``False``(undirected).
-
-    Returns:
-        graph: Generated graph.
-    """
-    if graph_type == 'list':
-        nodes = random.permutation(n)
-        edges = np.zeros((n, n))
-        for i in range(n - 1):
-            x, y = nodes[i], nodes[i + 1]
-            if directed:
-                edges[x, y] = 1
-            else:
-                edges[x, y] = edges[y, x] = 1
-        graph = Graph(n, edges)
-        graph.extra_info['nodes_list'] = nodes
-        return graph
-    else:
-        assert False, "not supported graph type: {}".format(graph_type)
-
-
 def random_generate_graph(n, p, directed=False) -> Graph:
     """Randomly generate a graph by sampling the existence of each edge.
-    Each edge between nodes has the probability :math:`p`(directed) or :math:`p^2`(undirected) to not exist.
+    Each edge between nodes has the probability `p` (directed) or `p^2` (undirected) to not exist.
 
     This paradigm is also called the Erdős–Rényi model.
 
     Args:
         n: The number of nodes in the graph.
         p: the probability that a edge doesn't exist in directed graph.
-        directed: Directed or Undirected graph. Default: ``False``(undirected)
+        directed: Directed or Undirected graph. Default: `False` (undirected).
 
     Returns:
         graph: Generated graph.
@@ -157,11 +132,13 @@ def random_generate_graph_dnc(n, p=None, directed=False) -> Graph:
 
     Args:
         n: The number of nodes in the graph.
-        p: Control the range of the sample of out-degree. Default: :math:`(1, n // 3)`
-            (float): :math:`(1, int(n * p))`
-            (int): :math:`(1, p)`
-            (tuple): :math:`(p[0], p[1])`
-        directed: Directed or Undirected graph. Default: False (undirected)
+        p: Control the range of the sample of out-degree. Default: :math:`[1, n // 3]`
+
+            - (float): :math:`[1, int(n * p)]`
+            - (int): :math:`[1, p]`
+            - (tuple): :math:`[p[0], p[1]]`
+
+        directed: Directed or Undirected graph. Default: `False` (undirected)
 
     Returns:
         graph: A randomly generated graph.
@@ -200,3 +177,33 @@ def random_generate_graph_dnc(n, p=None, directed=False) -> Graph:
     if not directed:
         edges = np.maximum(edges, edges.T)
     return Graph(n, edges, pos)
+
+
+def random_generate_special_graph(n: int, graph_type: str, directed: bool = False) -> Graph:
+    """Randomly generate a special type graph.
+
+    For list graph, the nodes are randomly permuted and connected in order. If the graph is directed, the edges are
+    directed from the first node to the last node.
+
+    Args:
+        n: The number of nodes in the graph.
+        graph_type: The type of the graph, e.g. list, tree. Currently only support list.
+        directed: Directed or Undirected graph. Default: `False` (undirected).
+
+    Returns:
+        graph: Generated graph.
+    """
+    if graph_type == 'list':
+        nodes = random.permutation(n)
+        edges = np.zeros((n, n))
+        for i in range(n - 1):
+            x, y = nodes[i], nodes[i + 1]
+            if directed:
+                edges[x, y] = 1
+            else:
+                edges[x, y] = edges[y, x] = 1
+        graph = Graph(n, edges)
+        graph.extra_info['nodes_list'] = nodes
+        return graph
+    else:
+        assert False, "not supported graph type: {}".format(graph_type)

@@ -32,7 +32,7 @@ class LinearSpline(object):
         return self.interpolator(x)
 
 
-def gen_cubic_spline(ys: np.ndarray):
+def gen_cubic_spline(ys: np.ndarray) -> CubicSpline:
     """Generate a cubic spline interpolation from an array of points."""
     xs = list(range(len(ys)))
     xs = np.asarray(xs, dtype=np.float32)
@@ -40,13 +40,23 @@ def gen_cubic_spline(ys: np.ndarray):
     return CubicSpline(xs, ys)
 
 
-def gen_linear_spline(ys):
+def gen_linear_spline(ys) -> LinearSpline:
     """Generate a linear spline interpolation from an array of points."""
     xs = list(range(len(ys)))
     return LinearSpline(xs, ys)
 
 
-def project_to_cubic_spline(spl: CubicSpline, y: np.ndarray, ys: np.ndarray):
+def project_to_cubic_spline(spl: CubicSpline, y: np.ndarray, ys: np.ndarray) -> float:
+    """Project a point to a cubic spline interpolation.
+
+    Args:
+        spl: the cubic spline interpolation.
+        y: the point to be projected.
+        ys: the array of points that the cubic spline interpolation is generated from.
+
+    Returns:
+        the time of the projected point.
+    """
     y = np.asarray(y, dtype=np.float32)
     dspl = spl.derivative()
 
@@ -66,7 +76,18 @@ def project_to_cubic_spline(spl: CubicSpline, y: np.ndarray, ys: np.ndarray):
     return float(res.x[0])
 
 
-def get_next_target_cubic_spline(spl: CubicSpline, y: np.ndarray, step_size: float, ys: np.ndarray):
+def get_next_target_cubic_spline(spl: CubicSpline, y: np.ndarray, step_size: float, ys: np.ndarray) -> np.ndarray:
+    """Get the next target point on a cubic spline interpolation.
+
+    Args:
+        spl: the cubic spline interpolation.
+        y: the current point.
+        step_size: the step size.
+        ys: the array of points that the cubic spline interpolation is generated from.
+
+    Returns:
+        the next target point.
+    """
     x = project_to_cubic_spline(spl, y, ys)
     # print('current time x', x, '/', len(ys) - 1)
     x = min(max(x + step_size, 0), len(ys) - 1)
@@ -74,7 +95,17 @@ def get_next_target_cubic_spline(spl: CubicSpline, y: np.ndarray, step_size: flo
     return spl(x)
 
 
-def project_to_linear_spline(spl: LinearSpline, y: np.ndarray, minimum_x=None):
+def project_to_linear_spline(spl: LinearSpline, y: np.ndarray, minimum_x: Optional[float] = None) -> float:
+    """Project a point to a linear spline interpolation.
+
+    Args:
+        spl: the linear spline interpolation.
+        y: the point to be projected.
+        minimum_x: the minimum x value to be considered.
+
+    Returns:
+        the time of the projected point.
+    """
     y = np.asarray(y, dtype=np.float32)
 
     def f(x):
@@ -89,7 +120,18 @@ def project_to_linear_spline(spl: LinearSpline, y: np.ndarray, minimum_x=None):
     return float(res.x[0])
 
 
-def get_next_target_linear_spline(spl: LinearSpline, y: np.ndarray, step_size: float, minimum_x: Optional[float] = None):
+def get_next_target_linear_spline(spl: LinearSpline, y: np.ndarray, step_size: float, minimum_x: Optional[float] = None) -> np.ndarray:
+    """Get the next target point on a linear spline interpolation.
+
+    Args:
+        spl: the linear spline interpolation.
+        y: the current point.
+        step_size: the step size.
+        minimum_x: the minimum x value to be considered.
+
+    Returns:
+        the next target point.
+    """
     x = project_to_linear_spline(spl, y, minimum_x=minimum_x)
     x = min(max(x + step_size, 0), len(spl.ys) - 1)
     return x, spl(x)

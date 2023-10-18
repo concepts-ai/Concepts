@@ -13,6 +13,7 @@ from copy import deepcopy
 
 __all__ = ['nsclseq_to_nscltree', 'nsclseq_to_nsclqsseq', 'nscltree_to_nsclqstree', 'program_to_nsclseq']
 
+
 def nsclseq_to_nscltree(seq_program):
     def dfs(sblock):
         tblock = deepcopy(sblock)
@@ -24,7 +25,8 @@ def nsclseq_to_nscltree(seq_program):
         return dfs(seq_program[-1])
     finally:
         del dfs
-        
+
+
 def nsclseq_to_nsclqsseq(seq_program):
     qs_seq = deepcopy(seq_program)
     cached = defaultdict(list)
@@ -37,6 +39,7 @@ def nsclseq_to_nsclqsseq(seq_program):
                 cached[param_type].append(sblock[param_type])'''
 
     return qs_seq
+
 
 def nscltree_to_nsclqstree(tree_program):
     qs_tree = deepcopy(tree_program)

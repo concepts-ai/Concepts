@@ -8,11 +8,11 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
-"""
-Basic concepts in the CLEVR dataset.
-"""
+"""Constants for the CLEVR dataset."""
 
-__all__ = ['g_attribute_concepts', 'g_relational_concepts', 'g_synonyms']
+from typing import Tuple, List
+
+__all__ = ['g_attribute_concepts', 'g_relational_concepts', 'g_synonyms', 'load_clevr_concepts']
 
 
 g_attribute_concepts = {
@@ -38,7 +38,13 @@ g_synonyms = {
 }
 
 
-def read_concepts():
+def load_clevr_concepts() -> Tuple[List[str], List[str], List[str]]:
+    """Return the concepts for CLEVR dataset.
+
+    Returns:
+        Tuple[List[str], List[str], List[str]]: attribute_concepts, relational_concepts, multi_relational_concepts
+    """
+
     attribute_concepts = []
     for k in g_attribute_concepts.keys():
         attribute_concepts.extend(g_attribute_concepts[k])

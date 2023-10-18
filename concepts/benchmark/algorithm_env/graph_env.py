@@ -26,16 +26,16 @@ class GraphEnvBase(SimpleRLEnvBase):
         """Initialize the environment.
 
         Args:
-            n: The number of nodes in the graph.
-            p: Parameter for random generation. (Default 0.5)
-                (edge method): The probability that a edge doesn't exist in directed graph.
-                (dnc method): Control the range of the sample of out-degree.
-                other methods: Unused.
-            directed: Directed or Undirected graph. Default: `False`(undirected)
+            nr_nodes: The number of nodes in the graph.
+            p: Parameter for random generation. (Default: 0.5)
+                - (edge method): The probability that an edge doesn't exist in directed graph.
+                - (dnc method): Control the range of the sample of out-degree.
+                - other methods: Unused.
+            directed: Directed or Undirected graph. Default: `False` (undirected)
             gen_method: Use which method to randomly generate a graph.
-                'edge': By sampling the existance of each edge.
-                'dnc': Sample out-degree (:math:`m`) of each nodes, and link to nearest neighbors in the unit square.
-                'list': generate a chain-like graph.
+                - 'edge': By sampling the existence of each edge.
+                - 'dnc': Sample out-degree (:math:`m`) of each node, and link to nearest neighbors in the unit square.
+                - 'list': generate a chain-like graph.
         """
 
         super().__init__()
@@ -79,8 +79,8 @@ class PathGraphEnv(GraphEnvBase):
                 other methods: Unused.
             directed: Directed or Undirected graph. Default: `False` (undirected)
             gen_method: Use which method to randomly generate a graph.
-                'edge': By sampling the existance of each edge.
-                'dnc': Sample out-degree (:math:`m`) of each nodes, and link to nearest neighbors in the unit square.
+                'edge': By sampling the existence of each edge.
+                'dnc': Sample out-degree (:math:`m`) of each node, and link to nearest neighbors in the unit square.
                 'list': generate a chain-like graph.
             dist_range: The sampling range of distance between starting node and the destination.
         """
@@ -93,7 +93,7 @@ class PathGraphEnv(GraphEnvBase):
         return self._dist
 
     def _restart(self):
-        """ Restart the environment. """
+        """Restart the environment."""
         super()._restart()
         self._dist = self._sample_dist()
         self._task = None

@@ -1,5 +1,25 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : crafting_world_rules.py
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 10/09/2023
+#
+# This file is part of Project Concepts.
+# Distributed under terms of the MIT license.
+
+"""The rules of the crafting world."""
+
 from functools import lru_cache
 from typing import List
+
+__all__ = [
+    'MINING_RULES', 'CRAFTING_RULES',
+    'get_all_mining_tools', 'get_all_mining_locations', 'get_all_mining_outcomes',
+    'get_all_crafting_ingradients', 'get_all_crafting_locations', 'get_all_crafting_outcomes',
+    'get_all_locations'
+]
+
 
 MINING_RULES = [
     dict(
@@ -290,3 +310,4 @@ def get_all_crafting_outcomes() -> List[str]:
 def get_all_locations() -> List[str]:
     """Return a list of all locations."""
     return get_all_mining_locations() + get_all_crafting_locations()
+

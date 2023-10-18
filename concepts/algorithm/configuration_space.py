@@ -98,7 +98,7 @@ class BoxConfigurationSpace(ConfigurationSpace):
         for s in range(1, samples - 1):
             sample = tuple(
                 [
-                    self.cspace_ranges[i].in_range(config1[i] + s * linear_interpolation[i])
+                    self.cspace_ranges[i].make_in_range(config1[i] + s * linear_interpolation[i])
                     for i in range(len(self.cspace_ranges))
                 ]
             )
@@ -116,7 +116,7 @@ class BoxConfigurationSpace(ConfigurationSpace):
         for s in range(1, nr_steps - 1):
             sample = tuple(
                 [
-                    self.cspace_ranges[i].in_range(config1[i] + s * linear_interpolation[i])
+                    self.cspace_ranges[i].make_in_range(config1[i] + s * linear_interpolation[i])
                     for i in range(len(self.cspace_ranges))
                 ]
             )

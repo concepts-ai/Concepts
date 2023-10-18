@@ -16,7 +16,7 @@ from torchvision import datasets
 import jacinle.random as random
 
 from concepts.benchmark.algorithm_env.graph import random_generate_graph, random_generate_graph_dnc
-from concepts.benchmark.inductive_reasoning.family import random_generate_family
+from concepts.benchmark.logic_induction.family import random_generate_family
 
 __all__ = ['GraphOutDegreeDataset', 'GraphConnectivityDataset', 'GraphAdjacentDataset', 'FamilyTreeDataset']
 

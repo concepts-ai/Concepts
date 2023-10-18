@@ -498,7 +498,7 @@ class ObjectCentricVisionPipeline(object):
             o3d.io.write_triangle_mesh(osp.join(output_dir, det_metainfo['mesh']), mesh)
             o3d.io.write_triangle_mesh(osp.join(output_dir, det_metainfo['mesh_obj']), mesh, write_triangle_uvs=True)
 
-            with jacinle.cond_with(jacinle.suppress_output(), not verbose):  # if verbose, print out the output of urdf builder
+            with jacinle.cond_with(jacinle.suppress_stdout(), not verbose):  # if verbose, print out the output of urdf builder
                 builder = ObjectUrdfBuilder(output_dir)
                 builder.build_urdf(osp.join(output_dir, det_metainfo['mesh_obj']), force_overwrite=True, decompose_concave=True, force_decompose=False, center=None)
 
@@ -788,7 +788,7 @@ def project_pointcloud_to_plane(pcd: o3d.geometry.PointCloud, model: np.ndarray)
         an open3d point cloud.
     """
 
-    xyz = np.asarray(pcd.points)
+    xyz = np.asarray(pcd.points).copy()
     d = np.dot(xyz, model[:3]) + model[3]
     xyz -= d[:, None] * model[None, :3]
     new_pcd = o3d.geometry.PointCloud()
@@ -826,7 +826,7 @@ def object_reconstruction_by_extrusion(
     """
 
     # Compute the max distance from the plane.
-    xyz = np.asarray(pcd.points, dtype=np.float32)
+    xyz = np.asarray(pcd.points, dtype=np.float32).copy()
     d = np.abs(model[:3].dot(xyz.T) + model[3]) / np.linalg.norm(model[:3])
     max_d = np.max(d)
 
@@ -1062,7 +1062,7 @@ def visualize_with_camera_matrix(geometries, camera_extrinsics):
     vis.destroy_window()
 
 
-def load_scene_in_pybullet(client: BulletClient, scene_dir: str, verbose: bool = False, simplify_name: bool = True) -> Dict[str, Dict]:
+def load_scene_in_pybullet(client: BulletClient, scene_dir: str, verbose: bool = False, simplify_name: bool = True, static: bool = False) -> Dict[str, Dict]:
     scene_metafile = osp.join(scene_dir, 'metainfo.json')
     scene_metainfo = jacinle.load(scene_metafile)
 
@@ -1097,8 +1097,13 @@ def load_scene_in_pybullet(client: BulletClient, scene_dir: str, verbose: bool =
         else:
             name = o['unique_label'].replace(' ', '_')
 
-        index = client.load_urdf(urdf_filename, body_name=name, pos=pos)
+        index = client.load_urdf(urdf_filename, body_name=name, pos=pos, static=static)
         load_metainfo[name] = dict(id=index, label=o['label'])
+
+    if verbose:
+        print('Loaded objects:')
+        for name, info in load_metainfo.items():
+            print(f'  {name}: {info["label"]}')
 
     return load_metainfo
 

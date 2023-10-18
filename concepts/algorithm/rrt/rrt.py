@@ -8,20 +8,18 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
+"""Basic RRT algorithm.
+
+The following algorithms and data structures have a generic interface. The are not designed specifically for a specific robot.
+"""
+
 import numpy as np
 import numpy.random as npr
 
 from typing import Optional, Tuple, List
 from concepts.algorithm.configuration_space import ProblemSpace
 
-__all__ = ['RRTNode', 'RRT', 'smooth_path', 'get_smooth_path', 'optimize_path', 'rrt', 'birrt']
-
-"""
-Basic RRT algorithm.
-
-The following algorithms and data structures have a generic interface. The are not designed specifically for a
-specific robot.
-"""
+__all__ = ['RRTNode', 'RRTTree', 'smooth_path', 'get_smooth_path', 'optimize_path', 'rrt', 'birrt']
 
 
 class RRTNode(object):
@@ -78,7 +76,7 @@ def traverse_rrt_bfs(nodes):
     return results
 
 
-class RRT(object):
+class RRTTree(object):
     """The RRT tree."""
 
     def __init__(self, pspace, roots):
@@ -178,7 +176,7 @@ def optimize_path(pspace, path, *args, **kwargs):
 
 
 def rrt(pspace, start_state, goal_state, nr_iterations=1000, p_sample_goal=0.05, nr_smooth_iterations=None):
-    rrt = RRT(pspace, RRTNode.from_states(start_state))
+    rrt_start = RRTTree(pspace, RRTNode.from_states(start_state))
 
     for i in range(nr_iterations):
         sample_goal = False
@@ -188,19 +186,19 @@ def rrt(pspace, start_state, goal_state, nr_iterations=1000, p_sample_goal=0.05,
         else:
             next_config = pspace.sample()
 
-        node = rrt.nearest(next_config)
+        node = rrt_start.nearest(next_config)
         success, next_config, _ = pspace.try_extend_path(node.config, next_config)
         if next_config is not None:
-            new_node = rrt.extend(node, next_config)
+            new_node = rrt_start.extend(node, next_config)
             if sample_goal and success:
-                return smooth_path(pspace, new_node.backtrace(), nr_smooth_iterations), rrt
+                return smooth_path(pspace, new_node.backtrace(), nr_smooth_iterations), rrt_start
 
-    return None, rrt
+    return None, rrt_start
 
 
-def birrt(pspace: ProblemSpace, start_state, goal_state, nr_iterations=1000, nr_smooth_iterations=None, smooth_fine_path=False) -> Tuple[Optional[List[np.ndarray]], Tuple[RRT, RRT]]:
-    rrt_start = RRT(pspace, RRTNode.from_states(start_state))
-    rrt_goal = RRT(pspace, RRTNode.from_states(goal_state))
+def birrt(pspace: ProblemSpace, start_state, goal_state, nr_iterations=1000, nr_smooth_iterations=None, smooth_fine_path=False) -> Tuple[Optional[List[np.ndarray]], Tuple[RRTTree, RRTTree]]:
+    rrt_start = RRTTree(pspace, RRTNode.from_states(start_state))
+    rrt_goal = RRTTree(pspace, RRTNode.from_states(goal_state))
     swapped = False
 
     if True:

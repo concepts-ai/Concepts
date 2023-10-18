@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
-# File   : domain-gen.py
+# File   : domain_gen.py
 # Author : Jiayuan Mao
 # Email  : maojiayuan@gmail.com
 # Date   : 01/06/2023
@@ -8,7 +8,12 @@
 # This file is part of HACL-PyTorch.
 # Distributed under terms of the MIT license.
 
+"""Generate the domain file for the crafting world."""
+
+import os.path as osp
 import concepts.benchmark.gridworld.crafting_world.crafting_world_rules as rules
+
+g_this_dir = osp.dirname(__file__)
 
 
 def underline_to_pascal(s):
@@ -211,9 +216,9 @@ def main():
         else:
             raise ValueError('Invalid recipe length: {}'.format(len(recipe)))
 
-    with open('./domain.pddl-template') as f:
+    with open(osp.join(g_this_dir, 'domain.pddl-template')) as f:
         template = f.read()
-    with open('./domain.pddl', 'w') as f:
+    with open(osp.join(g_this_dir, 'domain.pddl'), 'w') as f:
         f.write(template.format(mining_rules=mining_rules, crafting_rules=crafting_rules))
     print('Generated: domain.pddl')
 
@@ -249,11 +254,11 @@ def main_station_agnostic():
         else:
             raise ValueError('Invalid recipe length: {}'.format(len(recipe)))
 
-    with open('./domain.pddl-template') as f:
+    with open(osp.join(g_this_dir, 'domain.pddl-template')) as f:
         template = f.read()
-    with open('./domain-station-agnostic.pddl', 'w') as f:
+    with open(osp.join(g_this_dir, 'domain-station-agnostic.pddl'), 'w') as f:
         f.write(template.format(mining_rules=mining_rules, crafting_rules=crafting_rules))
-    print('Generated: domain.pddl')
+    print('Generated: domain-station-agnostic.pddl')
 
 
 

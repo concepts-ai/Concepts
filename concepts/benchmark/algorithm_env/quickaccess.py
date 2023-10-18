@@ -8,6 +8,7 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
+from typing import Optional
 from jaclearn.rl.env import RLEnvBase, ProxyRLEnvBase
 from jaclearn.rl.space import DiscreteActionSpace
 from jaclearn.rl.proxy import LimitLengthProxy
@@ -40,7 +41,7 @@ def _map_graph_action(p, n, exclude_self=True):
     return p
 
 
-def get_sort_env(n: int, exclude_self: bool = True) -> ListSortingEnv:
+def get_sort_env(n: int, exclude_self: bool = True) -> RLEnvBase:
     """Get a sorting environment with n elements.
 
     Args:
@@ -48,8 +49,9 @@ def get_sort_env(n: int, exclude_self: bool = True) -> ListSortingEnv:
         exclude_self: whether to exclude swap(i, i) actions.
 
     Returns:
-        A sorting environment.
+        the sorting environment.
     """
+
     env_cls = ListSortingEnv
     p = env_cls(n)
     p = LimitLengthProxy(p, n * 2)
@@ -57,15 +59,40 @@ def get_sort_env(n: int, exclude_self: bool = True) -> ListSortingEnv:
     return p
 
 
-def get_path_env(n, dist_range, prob_edge=0.5, directed=False, gen_method='edge'):
-    """Get a path-finding environment with n nodes."""
+def get_path_env(n, dist_range, prob_edge=0.5, directed=False, gen_method='edge', max_episode_len: Optional[int] = None) -> RLEnvBase:
+    """Get a path-finding environment with n nodes.
+
+    Args:
+        n: number of nodes.
+        dist_range: the range of distance between the start and the end.
+        prob_edge: the probability of an edge between two nodes.
+        directed: whether the graph is directed.
+        gen_method: the method to generate the graph. It can be 'edge' or 'dnc' or 'list'.
+        max_episode_len: the maximum length of the episode.
+
+    Returns:
+        the path-finding environment.
+    """
+
     env_cls = PathGraphEnv
     p = env_cls(n, dist_range, prob_edge, directed=directed, gen_method=gen_method)
-    # p = LimitLengthProxy(p, max_len)
+    if max_episode_len is not None:
+        p = LimitLengthProxy(p, max_episode_len)
     return p
 
 
 def make(task: str, *args, **kwargs) -> RLEnvBase:
+    """Make an environment.
+
+    Args:
+        task: the task name. It can be 'sort' or 'path'.
+        args: the arguments for the environment.
+        kwargs: the keyword arguments for the environment.
+
+    Returns:
+        env: the environment.
+    """
+
     if task == 'sort':
         return get_sort_env(*args, **kwargs)
     elif task == 'path':

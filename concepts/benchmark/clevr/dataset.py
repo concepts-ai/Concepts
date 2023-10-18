@@ -9,6 +9,7 @@
 # Distributed under terms of the MIT license.
 
 import os.path as osp
+from typing import Optional, Union, Callable, Sequence
 
 import nltk
 import numpy as np
@@ -20,17 +21,41 @@ import jaclearn.vision.coco.mask_utils as mask_utils
 from jacinle.logging import get_logger
 from jacinle.utils.container import GView
 from jactorch.data.dataset import FilterableDatasetUnwrapped, FilterableDatasetView
+from jactorch.data.dataloader import JacDataLoader
+from jactorch.data.collate import VarLengthCollateV2
 
 from concepts.benchmark.common.vocab import Vocab
 from concepts.benchmark.clevr.clevr_constants import g_attribute_concepts, g_relational_concepts
 
 logger = get_logger(__file__)
 
-__all__ = ['CLEVRDatasetUnwrapped', 'CLEVRDatasetFilterableView', 'make_dataset', 'CLEVRCustomTransferDataset', 'make_custom_transfer_dataset']
+__all__ = ['CLEVRDatasetUnwrapped', 'CLEVRDatasetFilterableView', 'make_dataset', 'CLEVRCustomTransferDataset', 'make_custom_transfer_dataset', 'annotate_scene', 'canonize_answer', 'annotate_objects']
 
 
 class CLEVRDatasetUnwrapped(FilterableDatasetUnwrapped):
-    def __init__(self, scenes_json, questions_json, image_root, image_transform, vocab_json, output_vocab_json, question_transform=None, incl_scene=True, incl_raw_scene=False):
+    """The unwrapped CLEVR dataset."""
+
+    def __init__(
+        self,
+        scenes_json: str, questions_json: str, image_root: str,
+        image_transform: Callable,
+        vocab_json: Optional[str], output_vocab_json: Optional[str],
+        question_transform: Optional[Callable] = None,
+        incl_scene: bool = True, incl_raw_scene: bool = False
+    ):
+        """Initialize the CLEVR dataset.
+
+        Args:
+            scenes_json: the path to the scenes json file.
+            questions_json: the path to the questions json file.
+            image_root: the root directory of the images.
+            image_transform: the image transform (torchvision transform).
+            vocab_json: the path to the vocab json file. If None, the vocab will be built from the dataset.
+            output_vocab_json: the path to the output vocab json file. If None, the output vocab will be built from the dataset.
+            question_transform: the question transform (a callable). If None, no transform will be applied.
+            incl_scene: whether to include the scene annotations (e.g., objects, relationships, etc.).
+            incl_raw_scene: whether to include the raw scene annotations.
+        """
         super().__init__()
 
         self.scenes_json = scenes_json
@@ -89,7 +114,26 @@ class CLEVRDatasetUnwrapped(FilterableDatasetUnwrapped):
     def _get_image_filename(self, scene: dict) -> str:
         return scene['image_filename']
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> dict:
+        """Get a sample from the dataset.
+
+        Returns:
+            a dict of annotations, including:
+                - scene: the scene annotations (raw dict).
+                - objects: the bounding boxes of the objects (a Tensor of shape [N, 4]).
+                - image_index: the index of the image (int).
+                - image_filename: the filename of the image (str).
+                - image: the image (a Tensor of shape [3, H, W]).
+                - question_index: the index of the question (int).
+                - question_raw: the raw question (str).
+                - question_raw_tokenized: the tokenized raw question (list of str).
+                - question: the tokenized question, and mapped to integers (a Tensor of shape [T]).
+                - question_type: the type of the question (str).
+                - answer: the answer to the question (bool, int, or str).
+                - attribute_{attr_name}: the attribute concept id for each object (a Tensor of shape [N]).
+                - attribute_relation_{attr_name}: the attribute relation concept id for each pair of objects (a Tensor of shape [N, N], then flattened to [N * N]).
+                - relation_{attr_name}: the relational concept id for each pair of objects (a Tensor of shape [N, N, NR], then flattened to [N * N * NR]).
+        """
         metainfo = GView(self.get_metainfo(index))
         feed_dict = GView()
 
@@ -130,19 +174,30 @@ class CLEVRDatasetUnwrapped(FilterableDatasetUnwrapped):
 
 
 class CLEVRDatasetFilterableView(FilterableDatasetView):
-    def filter_program_size_raw(self, max_length):
+    def filter_program_size_raw(self, max_length: int):
+        """Filter the questions by the length of the original CLEVR programs (in terms of the number of steps)."""
         def filt(question):
             return question['program'] is None or len(question['program']) <= max_length
 
         return self.filter(filt, 'filter-program-size-clevr[{}]'.format(max_length))
 
-    def filter_scene_size(self, max_scene_size):
+    def filter_scene_size(self, max_scene_size: int):
+        """Filter the questions by the size of the scene (in terms of the number of objects)."""
         def filt(question):
             return len(question['scene']['objects']) <= max_scene_size
 
         return self.filter(filt, 'filter-scene-size[{}]'.format(max_scene_size))
 
     def filter_question_type(self, *, allowed=None, disallowed=None):
+        """Filter the questions by the question type.
+
+        Args:
+            allowed: a set of allowed question types.
+            disallowed: a set of disallowed question types. Only one of `allowed` and `disallowed` can be provided.
+
+        Returns:
+            a new dataset view.
+        """
         def filt(question):
             if allowed is not None:
                 return question['question_type'] in allowed
@@ -156,10 +211,18 @@ class CLEVRDatasetFilterableView(FilterableDatasetView):
         else:
             raise ValueError('Must provide either allowed={...} or disallowed={...}.')
 
-    def make_dataloader(self, batch_size, shuffle, drop_last, nr_workers):
-        from jactorch.data.dataloader import JacDataLoader
-        from jactorch.data.collate import VarLengthCollateV2
+    def make_dataloader(self, batch_size: int, shuffle: bool, drop_last: bool, nr_workers: int) -> JacDataLoader:
+        """Make a dataloader for this dataset view.
 
+        Args:
+            batch_size: the batch size.
+            shuffle: whether to shuffle the dataset.
+            drop_last: whether to drop the remaining samples that are smaller than the batch size.
+            nr_workers: the number of workers for the dataloader.
+
+        Returns:
+            a JacDataLoader instance.
+        """
         collate_guide = {
             'scene': 'skip',
             'objects_raw': 'skip',
@@ -172,7 +235,6 @@ class CLEVRDatasetFilterableView(FilterableDatasetView):
 
             'question_raw': 'skip',
             'question_raw_tokenized': 'skip',
-            'question_type': 'skip',
             'question': 'pad',
 
             'program_raw': 'skip',
@@ -200,7 +262,29 @@ class CLEVRDatasetFilterableView(FilterableDatasetView):
 
 
 class CLEVRCustomTransferDataset(FilterableDatasetUnwrapped):
-    def __init__(self, scenes_json, questions_json, image_root, image_transform, query_list_key, custom_fields, output_vocab_json=None, incl_scene=True, incl_raw_scene=False):
+    """The unwrapped CLEVR dataset for custom transfer learning."""
+
+    def __init__(
+        self,
+        scenes_json: str, questions_json: str,
+        image_root: str, image_transform: Callable,
+        query_list_key: str, custom_fields: Sequence[str],
+        output_vocab_json: Optional[str] = None,
+        incl_scene: bool = True, incl_raw_scene: bool = False
+    ):
+        """Initialize the CLEVR custom transfer dataset.
+
+        Args:
+            scenes_json: the path to the scenes json file.
+            questions_json: the path to the questions json file.
+            image_root: the root directory of the images.
+            image_transform: the image transform (torchvision transform).
+            query_list_key: the key of the query list in the questions json file (e.g., 'questions' or 'questions_human').
+            custom_fields: the custom fields to be included in the dataset. These are fields in the scene annotations.
+            output_vocab_json: the path to the output vocab json file. If None, the output vocab will be built from the dataset.
+            incl_scene: whether to include the scene annotations (e.g., objects, relationships, etc.).
+            incl_raw_scene: whether to include the raw scene annotations.
+        """
         super().__init__()
 
         self.scenes_json = scenes_json
@@ -260,7 +344,25 @@ class CLEVRCustomTransferDataset(FilterableDatasetUnwrapped):
     def _get_image_filename(self, scene: dict) -> str:
         return scene['image_filename']
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> dict:
+        """Get a sample from the dataset.
+        
+        Returns:
+            a dict of annotations, including:
+                - scene: the scene annotations (raw dict).
+                - objects: the bounding boxes of the objects (a Tensor of shape [N, 4]).
+                - image_index: the index of the image (int).
+                - image_filename: the filename of the image (str).
+                - image: the image (a Tensor of shape [3, H, W]).
+                - question_index: the index of the question (int).
+                - question_raw: the raw question (str).
+                - question_type: the type of the question (str).
+                - answer: the answer to the question (bool, int, or str).
+                - attribute_{attr_name}: the attribute concept id for each object (a Tensor of shape [N]).
+                - attribute_relation_{attr_name}: the attribute relation concept id for each pair of objects (a Tensor of shape [N, N], then flattened to [N * N]).
+                - relation_{attr_name}: the relational concept id for each pair of objects (a Tensor of shape [N, N, NR], then flattened to [N * N * NR]).
+        """
+                  
         metainfo = GView(self.get_metainfo(index))
         feed_dict = GView()
 
@@ -291,10 +393,18 @@ class CLEVRCustomTransferDataset(FilterableDatasetUnwrapped):
     def __len__(self):
         return len(self.questions)
 
-    def make_dataloader(self, batch_size, shuffle, drop_last, nr_workers):
-        from jactorch.data.dataloader import JacDataLoader
-        from jactorch.data.collate import VarLengthCollateV2
+    def make_dataloader(self, batch_size: int, shuffle: bool, drop_last: bool, nr_workers: int) -> JacDataLoader:
+        """Make a dataloader for this dataset view.
 
+        Args:
+            batch_size: the batch size.
+            shuffle: whether to shuffle the dataset.
+            drop_last: whether to drop the remaining samples that are smaller than the batch size.
+            nr_workers: the number of workers for the dataloader.
+
+        Returns:
+            a JacDataLoader instance.
+        """
         collate_guide = {
             'scene': 'skip',
             'objects_raw': 'skip',
@@ -327,7 +437,22 @@ class CLEVRCustomTransferDataset(FilterableDatasetUnwrapped):
         )
 
 
-def make_dataset(scenes_json, questions_json, image_root, *, image_transform=None, vocab_json=None, output_vocab_json=None, filterable_view_cls=None, **kwargs):
+def make_dataset(
+    scenes_json: str, questions_json: str, image_root: str, *,
+    image_transform=None, vocab_json=None, output_vocab_json=None, filterable_view_cls=None, **kwargs
+) -> CLEVRDatasetFilterableView:
+    """Make a CLEVR dataset. See :class:`CLEVRDatasetUnwrapped` for more details.
+
+    Args:
+        scenes_json: the path to the scenes json file.
+        questions_json: the path to the questions json file.
+        image_root: the root directory of the images.
+        image_transform: the image transform (torchvision transform). If None, a default transform will be used.
+        vocab_json: the path to the vocab json file. If None, the vocab will be built from the dataset.
+        output_vocab_json: the path to the output vocab json file. If None, the output vocab will be built from the dataset.
+        filterable_view_cls: the filterable view class. If None, the default :class:`CLEVRDatasetFilterableView` will be used.
+        **kwargs: other keyword arguments for the dataset.
+    """
     if filterable_view_cls is None:
         filterable_view_cls = CLEVRDatasetFilterableView
 
@@ -346,7 +471,25 @@ def make_dataset(scenes_json, questions_json, image_root, *, image_transform=Non
     ))
 
 
-def make_custom_transfer_dataset(scenes_json, questions_json, image_root, query_list_key, custom_fields, *, image_transform=None, output_vocab_json=None, **kwargs):
+def make_custom_transfer_dataset(
+    scenes_json: str, questions_json: str, image_root: str, query_list_key: str, custom_fields: Sequence[str], *,
+    image_transform=None, output_vocab_json=None, **kwargs
+) -> CLEVRCustomTransferDataset:
+    """Make a CLEVR custom transfer dataset. See :class:`CLEVRCustomTransferDataset` for more details.
+
+    Args:
+        scenes_json: the path to the scenes json file.
+        questions_json: the path to the questions json file.
+        image_root: the root directory of the images.
+        query_list_key: the key of the query list in the questions json file (e.g., 'questions' or 'questions_human').
+        custom_fields: the custom fields to be included in the dataset. These are fields in the scene annotations.
+        image_transform: the image transform (torchvision transform). If None, a default transform will be used.
+        output_vocab_json: the path to the output vocab json file. If None, the output vocab will be built from the dataset.
+        **kwargs: other keyword arguments for the dataset.
+
+    Returns:
+        a CLEVR custom transfer dataset.
+    """
     if image_transform is None:
         import jactorch.transforms.bbox as T
         image_transform = T.Compose([
@@ -364,7 +507,20 @@ def make_custom_transfer_dataset(scenes_json, questions_json, image_root, query_
     )
 
 
-def annotate_scene(scene):
+def annotate_scene(scene: dict) -> dict:
+    """Annotate the scene with the attribute and relational concepts. This function will add the following fields to
+    the scene annotations:
+
+    - attribute_{attr_name}: the attribute concept id for each object.
+    - attribute_relation_{attr_name}: the attribute relation concept id for each pair of objects.
+    - relation_{attr_name}: the relational concept id for each pair of objects.
+
+    Args:
+        scene: the scene annotations.
+
+    Returns:
+        a dict of annotations of the attributes and relations.
+    """
     feed_dict = dict()
 
     if not _is_object_annotation_available(scene):
@@ -401,7 +557,20 @@ def annotate_scene(scene):
     return feed_dict
 
 
-def canonize_answer(answer, question_type):
+def canonize_answer(answer: str, question_type: Optional[str] = None) -> Union[bool, int, str]:
+    """Canonize the answer to a standard format.
+
+    - For yes/no questions, the answer will be converted to a boolean.
+    - For count questions, the answer will be converted to an integer.
+    - For other questions, the answer will be kept as it is.
+
+    Args:
+        answer: the answer to be canonized.
+        question_type: the question type. If None, the question type will be inferred from the answer.
+
+    Returns:
+        the canonized answer.
+    """
     if answer in ('yes', 'no'):
         answer = (answer == 'yes')
     elif isinstance(answer, str) and answer.isdigit():
@@ -410,7 +579,17 @@ def canonize_answer(answer, question_type):
     return answer
 
 
-def annotate_objects(scene):
+def annotate_objects(scene: dict) -> dict:
+    """Annotate the scene with the object information. This function will add the following fields to the scene annotations:
+
+    - objects: the bounding boxes of the objects.
+
+    Args:
+        scene: the scene annotations.
+
+    Returns:
+        a dict of annotations of the objects.
+    """
     if 'objects' not in scene and 'objects_detection' not in scene:
         return dict()
 
@@ -423,13 +602,13 @@ def annotate_objects(scene):
     return {'objects': boxes.astype('float32')}
 
 
-def _is_object_annotation_available(scene):
+def _is_object_annotation_available(scene: dict) -> bool:
     if len(scene['objects']) > 0 and 'mask' in scene['objects'][0]:
         return True
     return False
 
 
-def _get_object_masks(scene):
+def _get_object_masks(scene: dict) -> list:
     """Backward compatibility: in self-generated clevr scenes, the groundtruth masks are provided;
     while in the clevr test data, we use Mask R-CNN to detect all the masks, and stored in `objects_detection`."""
     if 'objects_detection' not in scene:
@@ -456,13 +635,15 @@ g_last_op_to_question_type = {
 }
 
 
-def get_op_type(op):
+def get_op_type(op: dict) -> str:
+    """Get the type of the operation. This function is used to handle two different formats of the CLEVR programs."""
     if 'type' in op:
         return op['type']
     return op['function']
 
 
-def get_question_type(program):
+def get_question_type(program: list) -> str:
+    """Get the question type from the full program. This function basically returns the type of the last operation in the program."""
     if program is None:
         return 'unk'
     return g_last_op_to_question_type[get_op_type(program[-1])]

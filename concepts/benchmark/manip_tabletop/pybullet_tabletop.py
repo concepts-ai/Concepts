@@ -142,12 +142,13 @@ class TableTopEnv(object):
     def add_container(
         self, size_2d: Vec2f, depth: float, location_2d: Vec2f, name: str = 'container', *,
         static=True,
-        color_rgba: Vec4f = (0.5, 0.5, 0.5, 1)
+        color_rgba: Vec4f = (0.61176471, 0.45882353, 0.37254902, 1)
     ) -> int:
         return self.client.load_urdf_template(
             'assets://basic/container/container-template.urdf', {
                 'DIM': (size_2d[0], size_2d[1], depth),
-                'HALF': (size_2d[0] / 2, size_2d[1] / 2, depth / 2)
+                'HALF': (size_2d[0] / 2, size_2d[1] / 2, depth / 2),
+                'RGBA': (color_rgba[0], color_rgba[1], color_rgba[2], color_rgba[3])
             },
             (location_2d[0], location_2d[1], depth / 2),
             rgba=(0.5, 1.0, 0.5, 1.0),
