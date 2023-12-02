@@ -39,9 +39,9 @@ def _gen_random_question(shapes, arity: int):
         answer = False
 
         if relation == 'left':
-            indices = [(0, 1), (1, 2)]
+            indices = [(0, 1), (1, 2), (0, 2)]
         else:
-            indices = [(1, 2), (0, 1)]
+            indices = [(1, 0), (2, 1), (2, 0)]
         for i, j in indices:
             if shapes[i]['shape'] == label1_primitive or shapes[i]['color'] == label1_primitive:
                 if shapes[j]['shape'] == label2_primitive or shapes[j]['color'] == label2_primitive:

@@ -10,8 +10,77 @@
 
 import numpy as np
 import jacinle.random as random
+from torch.utils.data.dataset import Dataset
 
-__all__ = ['Family', 'random_generate_family']
+__all__ = ['FamilyTreeDataset', 'Family', 'random_generate_family']
+
+
+class FamilyTreeDataset(Dataset):
+    def __init__(self, nr_people, epoch_size, task, p_marriage=0.8, balance_sample=False):
+        super().__init__()
+        if type(nr_people) is int:
+            self.nr_people = (max(nr_people // 2, 1), nr_people)
+        else:
+            self.nr_people = tuple(nr_people)
+        self.epoch_size = epoch_size
+        self.task = task
+        self.p_marriage = p_marriage
+        self.balance_sample = balance_sample
+        self.data = []
+
+        assert task in ['has-father', 'has-daughter', 'has-sister', 'parents', 'grandparents', 'uncle', 'maternal-great-uncle']
+
+    def _gen_family(self, item):
+        nr_people = item % (self.nr_people[1] - self.nr_people[0] + 1) + self.nr_people[0]
+        return random_generate_family(nr_people, self.p_marriage)
+
+    def __getitem__(self, item):
+        while len(self.data) == 0:
+            family = self._gen_family(item)
+            relations = family._relations[:, :, 2:]
+            if self.task == 'has-father':
+                target = family.has_father()
+            elif self.task == 'has-daughter':
+                target = family.has_daughter()
+            elif self.task == 'has-sister':
+                target = family.has_sister()
+            elif self.task == 'parents':
+                target = family.get_parents()
+            elif self.task == 'grandparents':
+                target = family.get_grandparents()
+            elif self.task == 'uncle':
+                target = family.get_uncle()
+            elif self.task == 'maternal-great-uncle':
+                target = family.get_maternal_great_uncle()
+            else:
+                assert False, "{} is not supported.".format(self.task)
+
+            if not self.balance_sample:
+                return dict(n=family._n, relations=relations, target=target)
+
+            def get_position(x):
+                return list(np.vstack(np.where(x)).T)
+
+            def append_data(pos, target):
+                states = np.zeros((family._n, 2))
+                states[pos[0], 0] = states[pos[1], 1] = 1
+                self.data.append(dict(n=family._n, relations=relations, states=states, target=target))
+
+            positive = get_position(target == 1)
+            if len(positive) == 0:
+                continue
+            negative = get_position(target == 0)
+            np.random.shuffle(negative)
+            negative = negative[:len(positive)]
+            for i in positive:
+                append_data(i, 1)
+            for i in negative:
+                append_data(i, 0)
+
+        return self.data.pop()
+
+    def __len__(self):
+        return self.epoch_size
 
 
 class Family(object):
