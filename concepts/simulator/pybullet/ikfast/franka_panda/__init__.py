@@ -10,4 +10,4 @@
 
 from jacinle.jit.cext import auto_travis
 
-auto_travis(__file__)
+auto_travis(__file__, required_imports=['ikfast_panda_arm'])

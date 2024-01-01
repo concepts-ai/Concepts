@@ -32,7 +32,7 @@ from jacinle.utils.cache import cached_property
 from jacinle.utils.defaults import option_context
 from jacinle.utils.printing import indent_text
 
-from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, ConstantType, UnionType, Variable
+from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, ListType, ConstantType, UnionType, Variable
 from concepts.dsl.dsl_types import FormatContext, get_format_context
 
 if TYPE_CHECKING:
@@ -110,7 +110,7 @@ FunctionArgumentType = Union[ObjectType, ValueType, 'FunctionType']
 FunctionArgumentListType = Union[Sequence[FunctionArgumentType], Sequence[Variable], Dict[str, FunctionArgumentType]]
 """Acceptable types for function argument lists. See the documentation of `FunctionType` for more details."""
 
-FunctionReturnType = Union[ValueType, 'FunctionType', Sequence[Union[ValueType, 'FunctionType']]]
+FunctionReturnType = Union[ValueType, ListType, 'FunctionType', Sequence[Union[ValueType, ListType, 'FunctionType']]]
 """Acceptable types for function return types. See the documentation of `FunctionType` for more details."""
 
 
@@ -207,7 +207,7 @@ class FunctionType(TypeBase):
         if self.arguments_dict is None:
             self.arguments_dict = {name: dtype for name, dtype in zip(self.argument_names, self.argument_types)}
 
-        if isinstance(return_type, ValueType):
+        if isinstance(return_type, TypeBase):
             self.return_type = return_type
             self.return_name = return_name
         else:
@@ -223,15 +223,15 @@ class FunctionType(TypeBase):
                 if self.return_name is not None:
                     self.return_name = self.return_name[0]
 
-        self.is_singular_return = isinstance(self.return_type, ValueType)
-        self.is_cacheable = self._gen_is_cacheale()
+        self.is_singular_return = not isinstance(self.return_type, tuple)
+        self.is_cacheable = self._gen_is_cacheable()
 
         super().__init__(self._gen_typename(), alias=alias)
 
     def _gen_typename(self) -> str:
         return '(' + ', '.join([str(arg) for arg in self.arguments]) + ') -> ' + str(self.return_type)
 
-    def _gen_is_cacheale(self):
+    def _gen_is_cacheable(self):
         for arg_def in self.arguments:
             if isinstance(arg_def, ValueType):
                 return False

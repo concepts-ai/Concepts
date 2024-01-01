@@ -20,8 +20,8 @@ from distutils.extension import Extension
 # https://github.com/yijiangh/choreo/blob/bc777069b8eb7283c74af26e5461532aec3d9e8a/framefab_robot/abb/framefab_irb6600/framefab_irb6600_support/doc/ikfast_tutorial.rst
 
 
-def compile_ikfast(module_name, cpp_filename, remove_build=False):
-    ikfast_module = Extension(module_name, sources=[cpp_filename])
+def compile_ikfast(module_name, cpp_filename, remove_build=False, link_lapack=False):
+    ikfast_module = Extension(module_name, sources=[cpp_filename], extra_link_args=['-llapack'] if link_lapack else [])
     setup(
         name=module_name,
         version='1.0',

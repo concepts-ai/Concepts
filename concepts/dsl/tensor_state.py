@@ -269,23 +269,27 @@ class TensorState(TensorStateBase):
         for p in self.features.all_feature_names:
             feature = self.features[p]
             fmt += f'    {p}: {feature.format(content=False)}\n'
-        fmt += self.extra_state_str()
+        fmt += self.extra_state_str_after()
         fmt += '}'
         return fmt
 
     def __str__(self):
-        fmt = f'''{type(self).__name__}{{
-  states:
-'''
+        fmt = f'''{type(self).__name__}{{\n'''
+        fmt += self.extra_state_str_before()
+        fmt += '  states:\n'
         for p in self.features.all_feature_names:
             tensor = self.features[p]
             fmt += f'    - {p}'
             fmt += ': ' + indent_text(str(tensor), level=2).strip() + '\n'
-        fmt += self.extra_state_str()
+        fmt += self.extra_state_str_after()
         fmt += '}'
         return fmt
 
-    def extra_state_str(self) -> str:
+    def extra_state_str_before(self) -> str:
+        """Extra state string before the features."""
+        return ''
+
+    def extra_state_str_after(self) -> str:
         """Extra state string."""
         return ''
 
@@ -310,13 +314,16 @@ class NamedObjectTensorState(TensorState, NamedObjectStateMixin):
     def clone(self) -> 'NamedObjectTensorState':
         return type(self)(features=self._features.clone(), object_types=self.object_types, object_names=self.object_names, batch_dims=self._batch_dims, internals=self.clone_internals())
 
-    def extra_state_str(self) -> str:
+    def extra_state_str_before(self) -> str:
         """Extra state string: add the objects."""
         if self.object_names is not None:
-            objects_str = [f'{name} - {dtype.typename}' for name, dtype in zip(self.object_names, self.object_types)]
+            typename2objects = dict()
+            for name, dtype in zip(self.object_names, self.object_types):
+                typename2objects.setdefault(dtype.typename, list()).append(name)
+            objects_str = '; '.join([f'{typename}: [{", ".join(names)}]' for typename, names in typename2objects.items()])
         else:
-            objects_str = self.object_names
-        return '  objects: ' + ', '.join(objects_str) + '\n'
+            objects_str = ', '.join(self.object_names)
+        return '  objects: ' + objects_str + '\n'
 
 
 def concat_states(*args: TensorState) -> TensorState:

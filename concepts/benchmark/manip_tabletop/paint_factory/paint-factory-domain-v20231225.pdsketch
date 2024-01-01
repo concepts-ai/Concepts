@@ -1,0 +1,56 @@
+(define
+(domain painting-factory-v20231225)
+(:requirements :pdsketch-v2-1)
+
+(:types
+    item - object
+    robot - object
+    item-identifier - int64
+    robot-identifier - int64
+    qpos - vector[float32, 6]
+    pose - vector[float32, 7]
+)
+
+(:predicates
+    (robot-identifier ?r - robot -> robot-identifier)
+    (item-identifier ?o - item -> item-identifier)
+    (robot-qpos ?r - robot -> qpos)
+    (item-pose ?o - item -> pose)
+    (moveable ?o - item)
+    (item-image [observation=true, state=false] ?o - item -> vector[float32, 3])
+    (item-feature [state=true] ?o - item -> vector[float32, 64])
+)
+
+(:derived (is-red    ?o - item) (??f (item-feature ?o)))
+(:derived (is-green  ?o - item) (??f (item-feature ?o)))
+(:derived (is-yellow ?o - item) (??f (item-feature ?o)))
+(:derived (is-purple ?o - item) (??f (item-feature ?o)))
+(:derived (is-pink   ?o - item) (??f (item-feature ?o)))
+(:derived (is-cyan   ?o - item) (??f (item-feature ?o)))
+(:derived (is-brown  ?o - item) (??f (item-feature ?o)))
+(:derived (is-orange ?o - item) (??f (item-feature ?o)))
+(:derived (is-target ?o - item) (and (??f (item-feature ?o)) (not (moveable ?o)) ))
+(:derived (is-left   ?o1 - item ?o2 - item) (??f (item-pose ?o1) (item-pose ?o2)))
+(:derived (is-right  ?o1 - item ?o2 - item) (??f (item-pose ?o1) (item-pose ?o2)))
+(:derived (is-on     ?o1 - item ?o2 - item) (??f (item-pose ?o1) (item-pose ?o2)))
+(:derived (is-in     ?o1 - item ?o2 - item) (??f (item-pose ?o1) (item-pose ?o2)))
+
+(:action move-into
+    :parameters (?r - robot ?o - item ?c - item)
+    :precondition (and )
+    :effect (and
+        (item-pose::assign ?o (item-pose ?c))
+        (item-feature::cond-assign ?o
+            (??g (item-feature ?c))
+            (??h (item-feature ?c))
+        )
+    )
+)
+
+(:action move-to
+    :parameters (?o - item ?p - pose)
+    :precondition (and )
+    :effect (and (item-pose::assign ?o ?p))
+)
+
+)

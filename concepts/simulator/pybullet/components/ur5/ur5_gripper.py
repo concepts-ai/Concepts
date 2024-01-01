@@ -136,7 +136,7 @@ class Suction(Gripper):
 
         # For gripping and releasing rigid objects.
         self.contact_constraint = None
-        self.contact_ee_to_obj = None
+        self.contact_ee_to_object = None
 
         # Defaults for deformable parameters, and can override in tasks.
         self.def_ignore = 0.035  # TODO(daniel) check if this is needed
@@ -158,33 +158,32 @@ class Suction(Gripper):
 
     def activate(self):
         """Simulate suction using a rigid fixed constraint to contacted object."""
-        # TODO(andyzeng): check deformables logic.
-        # del def_ids
 
         if not self.activated:
             points = self.p.getContactPoints(bodyA=self.head_id, linkIndexA=0)
-            if points:
+            if len(points) > 0:
                 # Handle contact between suction with a rigid object.
                 for point in points:
                     obj_id, contact_link = point[2], point[4]
-                if obj_id in self.obj_ids['rigid']:
-                    body_pose = self.p.getLinkState(self.head_id, 0)  # the base link.
-                    obj_pose = self.p.getBasePositionAndOrientation(obj_id)
-                    world_to_body = p.invertTransform(body_pose[0], body_pose[1])
-                    obj_to_body = p.multiplyTransforms(world_to_body[0], world_to_body[1], obj_pose[0], obj_pose[1])
-                    self.contact_constraint = self.p.createConstraint(
-                        parentBodyUniqueId=self.head_id,
-                        parentLinkIndex=0,
-                        childBodyUniqueId=obj_id,
-                        childLinkIndex=contact_link,
-                        jointType=p.JOINT_FIXED,
-                        jointAxis=(0, 0, 0),
-                        parentFramePosition=obj_to_body[0],
-                        parentFrameOrientation=obj_to_body[1],
-                        childFramePosition=(0, 0, 0),
-                        childFrameOrientation=(0, 0, 0)
-                    )
-                    self.contact_ee_to_object = get_ee_to_tool(self.client, self.head_id, 0, obj_id)
+                    if obj_id in self.obj_ids['rigid']:
+                        body_pose = self.p.getLinkState(self.head_id, 0)  # the base link.
+                        obj_pose = self.p.getBasePositionAndOrientation(obj_id)
+                        world_to_body = p.invertTransform(body_pose[0], body_pose[1])
+                        obj_to_body = p.multiplyTransforms(world_to_body[0], world_to_body[1], obj_pose[0], obj_pose[1])
+                        self.contact_constraint = self.p.createConstraint(
+                            parentBodyUniqueId=self.head_id,
+                            parentLinkIndex=0,
+                            childBodyUniqueId=obj_id,
+                            childLinkIndex=contact_link,
+                            jointType=p.JOINT_FIXED,
+                            jointAxis=(0, 0, 0),
+                            parentFramePosition=obj_to_body[0],
+                            parentFrameOrientation=obj_to_body[1],
+                            childFramePosition=(0, 0, 0),
+                            childFrameOrientation=(0, 0, 0)
+                        )
+                        self.contact_ee_to_object = get_ee_to_tool(self.client, self.head_id, 0, obj_id)
+                        break
 
                 self.activated = True
 
@@ -209,7 +208,7 @@ class Suction(Gripper):
             self.world.set_body_state2_by_id(constraint.child_body, new_pos, new_quat)
         self.world.update_contact()
 
-    def release(self):
+    def release(self, verbose: bool = False):
         """Release gripper object, only applied if gripper is 'activated'.
 
         If suction off, detect contact between gripper and objects.
@@ -222,19 +221,23 @@ class Suction(Gripper):
         """
         if self.activated:
             self.activated = False
-            print('Releasing gripper.')
+            if verbose:
+                print('Releasing gripper.')
 
             # Release gripped rigid object (if any).
             if self.contact_constraint is not None:
-                print('Releasing gripped rigid object.')
+                if verbose:
+                    print('  Releasing gripped rigid object.')
                 try:
                     self.p.removeConstraint(self.contact_constraint)
                     self.contact_constraint = None
                 except:  # noqa: E772
-                    print('Failed to release gripped rigid object.')
+                    if verbose:
+                        print('  Failed to release gripped rigid object.')
                     pass
                 else:
-                    print('Released gripped rigid object.')
+                    if verbose:
+                        print('  Released gripped rigid object.')
                 self.init_grip_distance = None
                 self.init_grip_item = None
             self.contact_ee_to_object = None
@@ -249,7 +252,9 @@ class Suction(Gripper):
                 self.def_min_distance = None
 
     def detect_contact(self):
-        """Detects a contact with a rigid object."""
+        """Detects a contact with a rigid object. When the suction is on, this function detects whether the object being gripped is in contact with other objects.
+        When the suction is off, this function detects whether the suction is in contact with any objects.
+        """
         body, link = self.head_id, 0
         if self.activated and self.contact_constraint is not None:
             try:
@@ -263,7 +268,6 @@ class Suction(Gripper):
         points = self.p.getContactPoints(bodyA=body, linkIndexA=link)
         if self.activated:
             points = [point for point in points if point[2] != self.head_id]
-        # print(body, link, [self.client.w.body_names[point[2]] for point in points])
 
         # We know if len(points) > 0, contact is made with SOME rigid item.
         if points:

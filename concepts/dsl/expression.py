@@ -19,7 +19,10 @@ All classes extend the basic :class:`Expression` class. They can be categorized 
 Under the :class:`ValueOutputExpression` category, there are a few sub-categories:
 
 - :class:`ConstantExpression` which is the expression that outputs a constant value.
+- :class:`ListCreationExpression` which is the expression that creates a list.
+- :class:`ListExpansionExpression` which is the expression that expands a list into a sequence of values (e.g., plan steps).
 - :class:`FunctionApplicationExpression` which represents the application of a function.
+- :class:`ListFunctionApplicationExpression` which represents the application of a function to a list of arguments.
 - :class:`BoolExpression` which represents Boolean operations (and, or, not).
 - :class:`QuantificationExpression` which represents quantification (forall, exists).
 - :class:`GeneralizedQuantificationExpression` which represents generalized quantification (iota, all, counting quantifiers).
@@ -53,10 +56,10 @@ from jacinle.utils.printing import indent_text
 from jacinle.utils.defaults import wrap_custom_as_default, gen_get_default
 
 from concepts.dsl.dsl_types import FormatContext, get_format_context
-from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, AutoType, TensorValueTypeBase, PyObjValueType, BOOL, FLOAT32, INT64, ObjectConstant, Variable
+from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, ListType, AutoType, TensorValueTypeBase, PyObjValueType, BOOL, FLOAT32, INT64, ObjectConstant, Variable
 from concepts.dsl.dsl_functions import FunctionType, Function, FunctionArgumentUnset, AnonymousFunctionArgumentGenerator
 from concepts.dsl.dsl_domain import DSLDomainBase
-from concepts.dsl.value import ValueBase, Value
+from concepts.dsl.value import ValueBase, Value, ListValue
 from concepts.dsl.tensor_value import TensorValue
 
 try:
@@ -71,11 +74,11 @@ except ImportError:
 __all__ = [
     'DSLExpressionError', 'Expression', 'ExpressionDefinitionContext', 'get_expression_definition_context',
     'ObjectOutputExpression', 'ValueOutputExpression', 'VariableExpression', 'VariableAssignmentExpression',
-    'ObjectConstantExpression', 'ConstantExpression',
-    'FunctionApplicationError', 'FunctionApplicationExpression',
+    'ObjectConstantExpression', 'ConstantExpression', 'ListCreationExpression',
+    'FunctionApplicationError', 'FunctionApplicationExpression', 'ListFunctionApplicationExpression', 'ListExpansionExpression',
     'ConditionalSelectExpression', 'DeicticSelectExpression',
     'BoolOpType', 'BoolExpression', 'AndExpression', 'OrExpression', 'NotExpression',
-    'QuantificationOpType', 'QuantificationExpression', 'ForallExpression', 'ExistsExpression',
+    'QuantificationOpType', 'QuantificationExpression', 'GeneralizedQuantificationExpression', 'ForallExpression', 'ExistsExpression',
     'PredicateEqualExpression', 'AssignExpression', 'ConditionalAssignExpression', 'DeicticAssignExpression',
     'cvt_expression', 'cvt_expression_list', 'get_type', 'get_types',
     'is_object_output_expression', 'is_variable_assignment_expression', 'is_variable_assignment_expression',
@@ -131,6 +134,7 @@ class ExpressionDefinitionContext(object):
         domain: Optional['DSLDomainBase'] = None,
         scope: Optional[str] = None,
         is_effect_definition: bool = False,
+        slot_functions_are_sgc: bool = False,
         allow_auto_predicate_def: bool = True,
         check_arguments: bool = True,
     ):
@@ -141,6 +145,7 @@ class ExpressionDefinitionContext(object):
             domain: the domain of the expression.
             scope: the current definition scope (e.g., in a function). This variable will be used to generate unique names for the functions.
             is_effect_definition: whether the expression is defined in an effect of an operator.
+            slot_functions_are_sgc: whether the slot functions are SGC functions (state-goal-constraints functions).
             allow_auto_predicate_def: whether to enable automatic predicate definition.
             check_arguments: whether to check the arguments of the functions.
         """
@@ -151,6 +156,7 @@ class ExpressionDefinitionContext(object):
         self.scope = scope
         self.anonymous_argument_generator = AnonymousFunctionArgumentGenerator()
         self.is_effect_definition_stack = [is_effect_definition]
+        self.slot_functions_are_sgc = slot_functions_are_sgc
         self.allow_auto_predicate_def = allow_auto_predicate_def
         self.check_arguments = check_arguments
 
@@ -173,6 +179,9 @@ class ExpressionDefinitionContext(object):
 
     is_effect_definition_stack: List[bool]
     """Whether the expression is defined in an effect of an operator."""
+
+    slot_functions_are_sgc: bool
+    """Whether the slot functions are SGC functions (state-goal-constraints functions)."""
 
     allow_auto_predicate_def: bool
     """Whether to enable automatic predicate definition."""
@@ -214,7 +223,7 @@ class ExpressionDefinitionContext(object):
 
     @contextlib.contextmanager
     def new_variables(self, *args: Variable):
-        """Adding a list of new variables."""
+        """Adding a list of new variables. This function is a context manager, and the variables will be removed after the context is closed."""
         for arg in args:
             if arg.name in self.variable_name2obj:
                 raise ValueError(f'Variable {arg.name} already exists.')
@@ -224,6 +233,14 @@ class ExpressionDefinitionContext(object):
         for arg in reversed(args):
             self.variables.pop()
             del self.variable_name2obj[arg.name]
+
+    def add_variables(self, *args: Variable):
+        """Adding a list of new variables. Unlike :meth:`new_variables`, the variables will be directly added to the current context."""
+        for arg in args:
+            if arg.name in self.variable_name2obj:
+                raise ValueError(f'Variable {arg.name} already exists.')
+            self.variables.append(arg)
+            self.variable_name2obj[arg.name] = arg
 
     @contextlib.contextmanager
     def mark_is_effect_definition(self, is_effect_definition: bool):
@@ -281,11 +298,11 @@ class VariableExpression(Expression):
         return self.variable.name
 
     @property
-    def dtype(self) -> Union[ObjectType, ValueType, FunctionType]:
+    def dtype(self) -> Union[ObjectType, ValueType, FunctionType, ListType]:
         return self.variable.dtype
 
     @property
-    def return_type(self) -> Union[ObjectType, ValueType, FunctionType]:
+    def return_type(self) -> Union[ObjectType, ValueType, FunctionType, ListType]:
         return self.variable.dtype
 
     def __str__(self) -> str:
@@ -299,27 +316,39 @@ class VariableAssignmentExpression(Expression, ABC):
 
 
 class ObjectConstantExpression(ObjectOutputExpression):
-    def __init__(self, constant: ObjectConstant):
+    def __init__(self, constant: Union[ObjectConstant, ListValue]):
         self.constant = constant
 
-    constant: ObjectConstant
+    constant: Union[ObjectConstant, ListValue]
     """The object constant."""
 
     @property
     def name(self) -> str:
         """The name of the object."""
+        if not isinstance(self.constant, ObjectConstant):
+            raise TypeError('ObjectConstantExpression.name is only available for ObjectConstant.')
         return self.constant.name
 
     @property
-    def dtype(self) -> ObjectType:
+    def dtype(self) -> Union[ObjectType, ListType]:
         """The type of the object."""
+        if isinstance(self.constant, ListValue):
+            return self.constant.dtype
         return self.constant.dtype
 
     @property
-    def return_type(self) -> ObjectType:
+    def is_constant_list(self):
+        """Whether the object is a constant list."""
+        return isinstance(self.constant, ListValue)
+
+    @property
+    def return_type(self) -> Union[ObjectType, ListType]:
         return self.constant.dtype
 
     def __str__(self) -> str:
+        if self.is_constant_list:
+            constant_str = ' '.join(x.name for x in self.constant.values)
+            return f'OBJ::{{{constant_str}}}'
         return f'OBJ::{self.name}'
 
 
@@ -340,7 +369,10 @@ class ConstantExpression(ValueOutputExpression):
                 self.constant = Value(dtype, value)
 
     @property
-    def return_type(self) -> ValueType:
+    def return_type(self) -> Union[ValueType, ListType]:
+        if isinstance(self.constant, ListValue):
+            assert isinstance(self.constant.dtype.element_type, ValueType)
+            return self.constant.dtype
         assert isinstance(self.constant.dtype, ValueType)
         return self.constant.dtype
 
@@ -368,6 +400,55 @@ class ConstantExpression(ValueOutputExpression):
 
 ConstantExpression.TRUE = ConstantExpression.true()
 ConstantExpression.FALSE = ConstantExpression.false()
+
+
+class ListCreationExpression(Expression):
+    def __init__(self, arguments: Sequence[ValueOutputExpression], element_type: Optional[TypeBase] = None):
+        self.arguments = tuple(arguments)
+
+        if len(self.arguments) == 0:
+            assert element_type is not None, 'Must specify the element type if the list is empty.'
+            self.element_type = element_type
+        else:
+            self.element_type = element_type if element_type is not None else self.arguments[0].return_type
+
+        self.check_arguments()
+
+    @property
+    def return_type(self) -> ListType:
+        return ListType(self.element_type)
+
+    def _check_arguments(self):
+        for i, arg in enumerate(self.arguments):
+            if arg.return_type != self.element_type:
+                raise TypeError(f'Argument #{i} has type {arg.return_type}, which does not match the list type {self.element_type}.')
+
+    def __str__(self) -> str:
+        return f'{{{", ".join([str(arg) for arg in self.arguments])}}}'
+
+
+class ListExpansionExpression(Expression):
+    def __init__(self, expression: ValueOutputExpression):
+        self.expression = expression
+        self.check_arguments()
+        self.element_type = self.expression.return_type.element_type
+
+    expression: ValueOutputExpression
+    """The expression."""
+
+    element_type: TypeBase
+    """The element type."""
+
+    def _check_arguments(self):
+        assert isinstance(self.expression, ValueOutputExpression) and self.expression.return_type.is_list_type, \
+            f'ListExpansionExpression only accepts ValueOutputExpressions with list-typed return, got {self.expression} which returns {self.expression.return_type}.'
+
+    @property
+    def return_type(self) -> ListType:
+        return self.expression.return_type
+
+    def __str__(self) -> str:
+        return f'... {str(self.expression)}'
 
 
 class FunctionApplicationError(Exception):
@@ -442,6 +523,92 @@ class FunctionApplicationExpression(ValueOutputExpression):
 
     def __str__(self) -> str:
         fmt = self.function.name + '('
+        arg_fmt = [str(x) for x in self.arguments]
+        arg_fmt_len = [len(x) for x in arg_fmt]
+
+        ctx = get_format_context()
+
+        # The following criterion is just an approximation. A more principled way is to pass the current indent level
+        # to the recursive calls to str(x).
+        if ctx.expr_max_length > 0 and (sum(arg_fmt_len) + len(fmt) + 1 > ctx.expr_max_length):
+            if sum(arg_fmt_len) > ctx.expr_max_length:
+                fmt += '\n' + ',\n'.join([indent_text(x) for x in arg_fmt]) + '\n'
+            else:
+                fmt += '\n' + ', '.join(arg_fmt) + '\n'
+        else:
+            fmt += ', '.join(arg_fmt)
+        fmt += ')'
+        return fmt
+
+
+class ListFunctionApplicationExpression(ValueOutputExpression):
+    """Function application expression represents the application of a function over a list of arguments."""
+
+    def __init__(self, function: Function, arguments: Iterable[Expression]):
+        self.function = function
+        self.arguments = tuple(arguments)
+        self.check_arguments()
+
+    function: Function
+    """The function to be applied."""
+
+    arguments: Tuple[Expression, ...]
+    """The list of arguments to the function."""
+
+    def _check_arguments(self):
+        try:
+            if len(self.function.arguments) != len(self.arguments):
+                raise TypeError('Argument number mismatch: expect {}, got {}.'.format(len(self.function.arguments), len(self.arguments)))
+            for i, (arg_def, arg) in enumerate(zip(self.function.arguments, self.arguments)):
+                if isinstance(arg_def, Variable):
+                    if isinstance(arg, VariableExpression):
+                        if not arg.dtype.downcast_compatible(arg_def.dtype, allow_self_list=True):
+                            raise FunctionApplicationError(i, arg_def.dtype, arg.dtype)
+                    elif isinstance(arg, ObjectConstantExpression):
+                        if not arg.dtype.downcast_compatible(arg_def.dtype, allow_self_list=True):
+                            raise FunctionApplicationError(i, arg_def.dtype, arg.dtype)
+                    elif isinstance(arg, ConstantExpression):
+                        if not arg.return_type.downcast_compatible(arg_def.dtype, allow_self_list=True):
+                            raise FunctionApplicationError(i, arg_def.dtype, arg.return_type)
+                    elif isinstance(arg, (FunctionApplicationExpression, ListFunctionApplicationExpression, GeneralizedQuantificationExpression)):
+                        if not arg.return_type.downcast_compatible(arg_def.dtype, allow_self_list=True):
+                            raise FunctionApplicationError(i, arg_def.dtype, arg.return_type)
+                    elif isinstance(arg, ListCreationExpression):
+                        if not arg.return_type.downcast_compatible(arg_def.dtype, allow_self_list=True):
+                            raise FunctionApplicationError(i, arg_def.dtype, arg.return_type)
+                    else:
+                        raise FunctionApplicationError(i, 'VariableExpression or ObjectConstantExpression or ConstantExpression or FunctionApplication', type(arg))
+                elif isinstance(arg_def, ValueType):
+                    if isinstance(arg, ValueOutputExpression):
+                        pass
+                    elif isinstance(arg, VariableExpression) and isinstance(arg.return_type, ValueType):
+                        pass
+                    elif isinstance(arg, ConstantExpression):
+                        pass
+                    else:
+                        raise FunctionApplicationError(i, 'ValueOutputExpression', type(arg))
+                    if arg_def != arg.return_type:
+                        raise FunctionApplicationError(i, arg_def, arg.return_type)
+                else:
+                    raise TypeError('Unknown argument definition type: {}.'.format(type(arg_def)))
+        except (TypeError, FunctionApplicationError) as e:
+            error_header = 'Error during applying {}.\n'.format(str(self.function))
+            try:
+                arguments_str = ', '.join(str(arg) for arg in self.arguments)
+                error_header += ' Arguments: {}\n'.format(arguments_str)
+            except Exception:  # noqa
+                pass
+            raise TypeError(error_header + str(e)) from e
+
+    @property
+    def return_type(self) -> Union[ValueType, ListType]:
+        for arg in self.arguments:
+            if arg.return_type.is_list_type:
+                return ListType(self.function.return_type)
+        return self.function.return_type
+
+    def __str__(self) -> str:
+        fmt = self.function.name + '[list]('
         arg_fmt = [str(x) for x in self.arguments]
         arg_fmt_len = [len(x) for x in arg_fmt]
 
@@ -908,9 +1075,14 @@ def is_exists_expr(expr: Expression) -> TypeGuard[ExistsExpression]:
 def iter_exprs(expr: Expression) -> Iterable[Expression]:
     """Iterate over all sub-expressions of the input."""
     yield expr
-    if isinstance(expr, FunctionApplicationExpression):
+    if isinstance(expr, (FunctionApplicationExpression, ListFunctionApplicationExpression)):
         for arg in expr.arguments:
             yield from iter_exprs(arg)
+    elif isinstance(expr, ListCreationExpression):
+        for arg in expr.arguments:
+            yield from iter_exprs(arg)
+    elif isinstance(expr, ListExpansionExpression):
+        yield from iter_exprs(expr.expression)
     elif isinstance(expr, BoolExpression):
         for arg in expr.arguments:
             yield from iter_exprs(arg)
@@ -945,11 +1117,15 @@ def find_free_variables(expr: Expression) -> Tuple[Variable, ...]:
         if isinstance(e, VariableExpression):
             if e.variable.name not in bounded_variables:
                 free_variables[e.variable.name] = e.variable
+        elif isinstance(e, ListCreationExpression):
+            [dfs(arg) for arg in e.arguments]
+        elif isinstance(e, ListExpansionExpression):
+            dfs(e.expression)
         elif isinstance(e, (QuantificationExpression, GeneralizedQuantificationExpression)):
             bounded_variables[e.variable.name] = e.variable
             dfs(e.expression)
             del bounded_variables[e.variable.name]
-        elif isinstance(e, FunctionApplicationExpression):
+        elif isinstance(e, (FunctionApplicationExpression, ListFunctionApplicationExpression)):
             [dfs(arg) for arg in e.arguments]
         elif isinstance(e, BoolExpression):
             [dfs(arg) for arg in e.arguments]

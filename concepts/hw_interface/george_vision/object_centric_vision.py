@@ -480,6 +480,7 @@ class ObjectCentricVisionPipeline(object):
         }
         cv2.imwrite(osp.join(output_dir, 'color.png'), self.color_image[:, :, ::-1])
         cv2.imwrite(osp.join(output_dir, 'depth.png'), self.depth_image)
+        builder = ObjectUrdfBuilder(output_dir)
         for idx, detection in jacinle.tqdm_gofor(self.detected_objects, desc='Exporting objects'):
             det_metainfo = {
                 'index': idx,
@@ -499,7 +500,6 @@ class ObjectCentricVisionPipeline(object):
             o3d.io.write_triangle_mesh(osp.join(output_dir, det_metainfo['mesh_obj']), mesh, write_triangle_uvs=True)
 
             with jacinle.cond_with(jacinle.suppress_stdout(), not verbose):  # if verbose, print out the output of urdf builder
-                builder = ObjectUrdfBuilder(output_dir)
                 builder.build_urdf(osp.join(output_dir, det_metainfo['mesh_obj']), force_overwrite=True, decompose_concave=True, force_decompose=False, center=None)
 
         io.dump_json(osp.join(output_dir, 'metainfo.json'), metainfo)

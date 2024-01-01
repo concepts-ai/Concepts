@@ -74,9 +74,9 @@ class Robot(BulletComponent):
         """Register an action primitive.
 
         Args:
-            name (str): Name of the action primitive.
-            func (Callable): Function that implements the action primitive.
-            interface (Optional[str], optional): Interface of the action primitive. Defaults to None.
+            name: Name of the action primitive.
+            func: Function that implements the action primitive.
+            interface: Interface of the action primitive. Defaults to None.
                 If None, the action primitive is registered for the current interface.
 
         Raises:
@@ -92,7 +92,7 @@ class Robot(BulletComponent):
         """Execute an action primitive.
 
         Args:
-            action_name (str): Name of the action primitive.
+            action_name: Name of the action primitive.
 
         Returns:
             bool: True if the action primitive is successful.
@@ -132,7 +132,7 @@ class Robot(BulletComponent):
         """Set the joint configuration.
 
         Args:
-            qpos (np.ndarray): Joint configuration.
+            qpos: Joint configuration.
         """
         raise NotImplementedError()
 
@@ -140,7 +140,7 @@ class Robot(BulletComponent):
         """Set the joint configuration with the gripper holding the object.
 
         Args:
-            qpos (np.ndarray): Joint configuration.
+            qpos: Joint configuration.
         """
         return self.set_qpos(qpos)
 
@@ -152,8 +152,11 @@ class Robot(BulletComponent):
         """Reset the home joint configuration."""
         raise NotImplementedError()
 
-    def get_ee_pose(self) -> Tuple[np.ndarray, np.ndarray]:
+    def get_ee_pose(self, fk: bool = True) -> Tuple[np.ndarray, np.ndarray]:
         """Get the pose of the end effector.
+
+        Args:
+            fk: whether to run forward kinematics to re-compute the pose.
 
         Returns:
             Tuple[np.ndarray, np.ndarray]: 3D position and 4D quaternion of the end effector.
@@ -180,8 +183,8 @@ class Robot(BulletComponent):
         """Forward kinematics.
 
         Args:
-            qpos (np.ndarray): Joint configuration.
-            link_name_or_id (Union[str, int], optional): name or id of the link. If not specified, the pose of the end effector is returned.
+            qpos: Joint configuration.
+            link_name_or_id: name or id of the link. If not specified, the pose of the end effector is returned.
 
         Returns:
             Tuple[np.ndarray, np.ndarray]: 3D position and 4D quaternion of the end effector.
@@ -192,14 +195,14 @@ class Robot(BulletComponent):
         """Inverse kinematics.
 
         Args:
-            pos (np.ndarray): 3D position of the end effector.
-            quat (np.ndarray): 4D quaternion of the end effector.
-            force (bool, optional): Whether to force the IK solver to return a solution. Defaults to False.
+            pos: 3D position of the end effector.
+            quat: 4D quaternion of the end effector.
+            force: Whether to force the IK solver to return a solution. Defaults to False.
                 If set, the IK solve may return a solution even if the end effector is not at the given pose.
                 This function is useful for debugging and for moving towards a certain direction.
-            max_distance (float, optional): Maximum distance between the last qpos and the solution (Only used for IKFast). Defaults to float('inf').
-            max_attempts (int, optional): Maximum number of attempts (only used for IKFast). Defaults to 1000.
-            verbose (bool, optional): Whether to print debug information.
+            max_distance: Maximum distance between the last qpos and the solution (Only used for IKFast). Defaults to float('inf').
+            max_attempts: Maximum number of attempts (only used for IKFast). Defaults to 1000.
+            verbose: Whether to print debug information.
 
         Returns:
             np.ndarray: Joint configuration.
@@ -216,12 +219,12 @@ class Robot(BulletComponent):
         """Inverse kinematics using pybullet.
 
         Args:
-            pos (np.ndarray): 3D position of the end effector.
-            quat (np.ndarray): 4D quaternion of the end effector.
-            force (bool, optional): Whether to force the IK solver to return a solution. Defaults to False.
+            pos: 3D position of the end effector.
+            quat: 4D quaternion of the end effector.
+            force: Whether to force the IK solver to return a solution. Defaults to False.
                 If set, the IK solve may return a solution even if the end effector is not at the given pose.
                 This function is useful for debugging and for moving towards a certain direction.
-            verbose (bool, optional): Whether to print debug information.
+            verbose: Whether to print debug information.
 
         Returns:
             np.ndarray: Joint configuration.
@@ -232,14 +235,14 @@ class Robot(BulletComponent):
         """Inverse kinematics using IKFast.
 
         Args:
-            pos (np.ndarray): 3D position of the end effector.
-            quat (np.ndarray): 4D quaternion of the end effector.
-            last_qpos (Optional[np.ndarray], optional): Last joint configuration. Defaults to None.
+            pos: 3D position of the end effector.
+            quat: 4D quaternion of the end effector.
+            last_qpos: Last joint configuration. Defaults to None.
                 If None, the current joint configuration is used.
-            max_attempts (int, optional): Maximum number of IKFast attempts. Defaults to 1000.
-            max_distance (float, optional): Maximum distance between the target pose and the end effector. Defaults to float('inf').
-            error_on_fail (bool, optional): Whether to raise an error if the IKFast solver fails. Defaults to True.
-            verbose (bool, optional): Whether to print debug information.
+            max_attempts: Maximum number of IKFast attempts. Defaults to 1000.
+            max_distance: Maximum distance between the target pose and the end effector. Defaults to float('inf').
+            error_on_fail: Whether to raise an error if the IKFast solver fails. Defaults to True.
+            verbose: Whether to print debug information.
 
         Returns:
             np.ndarray: Joint configuration.
@@ -250,9 +253,10 @@ class Robot(BulletComponent):
         """Move the robot to the given joint configuration.
 
         Args:
-            target_qpos (np.ndarray): Target joint configuration.
-            speed (float, optional): Speed of the movement. Defaults to 0.01.
-            timeout (float, optional): Timeout of the movement. Defaults to 10.
+            target_qpos: Target joint configuration.
+            speed: Speed of the movement. Defaults to 0.01.
+            timeout: Timeout of the movement. Defaults to 10.
+            local_smoothing: Whether to use local smoothing. Defaults to True.
 
         Returns:
             bool: True if the movement is successful.
@@ -267,10 +271,10 @@ class Robot(BulletComponent):
         """Move the end effector to the given pose.
 
         Args:
-            pos (np.ndarray): 3D position of the end effector.
-            quat (np.ndarray): 4D quaternion of the end effector.
-            speed (float, optional): Speed of the movement. Defaults to 0.01.
-            force (bool, optional): Whether to force the IK solver to return a solution. Defaults to False.
+            pos: 3D position of the end effector.
+            quat: 4D quaternion of the end effector.
+            speed: Speed of the movement. Defaults to 0.01.
+            force: Whether to force the IK solver to return a solution. Defaults to False.
                 If set, the IK solve may return a solution even if the end effector is not at the specified pose.
 
         Returns:
@@ -287,10 +291,10 @@ class Robot(BulletComponent):
         """Move the robot along the given joint configuration trajectory.
 
         Args:
-            qpos_trajectory (Iterable[np.ndarray]): Joint configuration trajectory.
-            speed (float, optional): Speed of the movement. Defaults to 0.01.
-            timeout (float, optional): Timeout of the movement. Defaults to 10.
-            first_timeout (float, optional): Timeout of the first movement. Defaults to None (same as timeout).
+            qpos_trajectory: Joint configuration trajectory.
+            speed: Speed of the movement. Defaults to 0.01.
+            timeout: Timeout of the movement. Defaults to 10.
+            first_timeout: Timeout of the first movement. Defaults to None (same as timeout).
 
         Returns:
             bool: True if the movement is successful.

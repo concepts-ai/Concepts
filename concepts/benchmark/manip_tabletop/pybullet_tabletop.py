@@ -9,8 +9,9 @@
 # Distributed under terms of the MIT license.
 
 import os.path as osp
-from typing import Optional, List
+from typing import Optional, Union, List
 
+import numpy as np
 import jacinle.io as io
 
 from concepts.simulator.pybullet.client import BulletClient
@@ -18,9 +19,11 @@ from concepts.simulator.pybullet.world import WorldSaver
 from concepts.simulator.pybullet.components.ur5.ur5_robot import UR5Robot
 from concepts.simulator.pybullet.components.panda.panda_robot import PandaRobot
 from concepts.simulator.pybullet.rotation_utils import rpy
+from concepts.pdsketch.domain import State
+from concepts.pdsketch.executor import PDSketchExecutor
 from concepts.utils.typing_utils import Vec2f, Vec3f, Vec4f, BroadcastableVec3f
 
-__all__ = ['TableTopEnv']
+__all__ = ['TableTopEnv', 'SimpleTableTopEnv', 'get_tabletop_base_domain_filename']
 
 
 class TableTopEnv(object):
@@ -30,13 +33,29 @@ class TableTopEnv(object):
     The environment will be simulated by pybullet.
     """
 
-    def __init__(self, client: Optional[BulletClient] = None):
+    def __init__(self, client: Optional[BulletClient] = None, executor: Optional[PDSketchExecutor] = None, seed: int = 1234):
         if client is None:
             client = BulletClient()
 
         self.client = client
         self.robot = None
         self.saver = WorldSaver(client.w, save=False)
+        self.metainfo = dict()
+
+        self._executor = executor
+        self.np_random = np.random.RandomState(seed)
+
+    @property
+    def executor(self) -> PDSketchExecutor:
+        if self._executor is None:
+            raise RuntimeError('Executor is not initialized yet.')
+        return self._executor
+
+    def set_executor(self, executor: PDSketchExecutor):
+        self._executor = executor
+
+    def seed(self, seed: int):
+        self.np_random.seed(seed)
 
     @property
     def world(self):
@@ -52,6 +71,15 @@ class TableTopEnv(object):
 
     def reset(self) -> None:
         self.saver.restore()
+
+    def restore(self) -> None:
+        """Restore the environment to the last saved state."""
+        self.saver.restore()
+
+    def set_default_debug_camera(self, distance: float = 1.0):
+        """Set the default debug camera of the environment."""
+        target = self.world.get_debug_camera().target
+        self.world.set_debug_camera(distance, 90, -25, target=target)
 
     PLANE_FILE = 'assets://basic/plane/plane.urdf'
     WORKSPACE_FILE = 'assets://basic/plane/workspace.urdf'
@@ -142,19 +170,24 @@ class TableTopEnv(object):
     def add_container(
         self, size_2d: Vec2f, depth: float, location_2d: Vec2f, name: str = 'container', *,
         static=True,
-        color_rgba: Vec4f = (0.61176471, 0.45882353, 0.37254902, 1)
+        color_rgba: Optional[Vec4f] = None,
+        quat: Optional[Vec4f] = None,
     ) -> int:
-        return self.client.load_urdf_template(
+        container_id = self.client.load_urdf_template(
             'assets://basic/container/container-template.urdf', {
                 'DIM': (size_2d[0], size_2d[1], depth),
                 'HALF': (size_2d[0] / 2, size_2d[1] / 2, depth / 2),
-                'RGBA': (color_rgba[0], color_rgba[1], color_rgba[2], color_rgba[3])
             },
             (location_2d[0], location_2d[1], depth / 2),
+            quat=quat,
             rgba=(0.5, 1.0, 0.5, 1.0),
             body_name=name,
             static=static,
         )
+
+        if color_rgba is not None:
+            self.p.changeVisualShape(container_id, -1, rgbaColor=color_rgba)
+        return container_id
 
     def add_bar(
         self, size_2d: Vec2f, thickness: float, location_2d: Vec2f, name: str = 'bar-shape', *,
@@ -309,3 +342,103 @@ class TableTopEnv(object):
             static=static,
         )
 
+    @property
+    def ocrtoc_root(self) -> str:
+        return osp.join(self.client.assets_root, 'ocrtoc')
+
+    def list_ocrtoc_objects(self) -> List[str]:
+        all_model_names = list()
+        for dirname in io.lsdir(self.ocrtoc_root, '*'):
+            if osp.isdir(dirname) and osp.exists(osp.join(dirname, 'model.urdf')):
+                all_model_names.append(osp.basename(dirname))
+        return all_model_names
+
+    def add_ocrtoc_object(
+        self, identifier: str, location_3d: Vec3f, scale: float = 1.0, name: Optional[str] = None, *,
+        static: bool = False, quat: Vec4f = (0, 0, 0, 1)
+    ):
+        if name is None:
+            name = identifier
+        return self.client.load_urdf(
+            osp.join(self.ocrtoc_root, identifier, 'model.urdf'),
+            location_3d,
+            quat,
+            body_name=name,
+            scale=scale,
+            static=static,
+        )
+
+    def get_support(self, body_id: int, return_name: bool = True) -> List[Union[str, int]]:
+        return _get_support(self, body_id, return_name=return_name)
+
+
+
+class SimpleTableTopEnv(TableTopEnv):
+    def reset(self):
+        with self.client.disable_rendering(disable_rendering=True):
+            metainfo = self._reset_scene()
+
+        self.metainfo = metainfo
+        self.saver.save()
+
+    def _reset_scene(self):
+        raise NotImplementedError
+
+    def get_pds_state(self) -> State:
+        objects = dict()
+        for name, info in self.metainfo.items():
+            object_type = self.executor.domain.types['robot'] if name == 'robot' else self.executor.domain.types['item']
+            objects[name] = object_type
+
+        state, ctx = self.executor.new_state(objects, create_context=True)
+
+        for name, info in self.metainfo.items():
+            index = info['id']
+            if name == 'robot':
+                ctx.set_value('robot-qpos', [name], self.robot.get_qpos())
+                ctx.set_value('robot-identifier', [name], index)
+            else:
+                ctx.set_value('item-pose', [name], self.world.get_body_state_by_id(index).get_7dpose())
+                ctx.set_value('item-identifier', [name], index)
+
+        for name, info in self.metainfo.items():
+            if name not in ('robot', 'table', 'panda'):
+                for name2 in _get_support(self, info['id']):
+                    if name2 not in ('robot', 'panda'):
+                        ctx.set_value('support', [name, name2], True)
+
+        ctx.init_feature('moveable')
+        for name, info in self.metainfo.items():
+            if 'moveable' in info and info['moveable']:
+                ctx.set_value('moveable', [name], True)
+
+        if hasattr(self.robot, 'gripper_constraint'):
+            if self.robot.gripper_constraint is None:
+                ctx.define_predicates([ctx.robot_hands_free('robot')])
+            else:
+                constraint = self.world.get_constraint(self.robot.gripper_constraint)
+                name = self.world.body_names[constraint.child_body]
+                ctx.define_predicates([ctx.robot_holding_item('robot', name)])
+
+        return state
+
+
+def get_tabletop_base_domain_filename() -> str:
+    return osp.join(osp.dirname(__file__), 'pybullet_tabletop_base.pdsketch')
+
+
+def _get_support(env: TableTopEnv, body_id: int, return_name: bool = True) -> List[Union[str, int]]:
+    all_contact = env.world.get_contact(body_id)
+    supported_by_list = set()
+    for contact in all_contact:
+        body_name = contact.body_b_name
+        if body_name == 'robot':
+            continue
+
+        normal = contact.contact_normal_on_b
+        if normal[2] > np.cos(np.deg2rad(45)):
+            if return_name:
+                supported_by_list.add(body_name)
+            else:
+                supported_by_list.add(contact.body_b)
+    return list(supported_by_list)

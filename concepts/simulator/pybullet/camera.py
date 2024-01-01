@@ -13,10 +13,13 @@ import collections
 import numpy as np
 import pybullet as p
 
-from typing import Optional, Tuple
+from typing import Optional, Union, Tuple
 from .rotation_utils import rpy
 
-__all__ = ['CameraConfig', 'RealSenseD415', 'TopDownOracle', 'RS200Gazebo', 'KinectFranka', 'Cliport', 'get_point_cloud', 'lookat_rpy']
+__all__ = [
+    'CameraConfig', 'RealSenseD415', 'TopDownOracle', 'RS200Gazebo', 'KinectFranka', 'CLIPortCamera',
+    'get_point_cloud', 'get_point_cloud_image', 'get_orthographic_heightmap', 'lookat_rpy'
+]
 
 
 class CameraConfig(collections.namedtuple('_CameraConfig', ['image_size', 'intrinsics', 'position', 'rotation', 'zrange', 'shadow'])):
@@ -117,8 +120,8 @@ class KinectFranka(object):
         return [CameraConfig(cls.image_size, cls.intrinsics, cls.position, cls.rotation, (0.1, 10.), True)]
 
 
-class Cliport(object):
-    """Cliport camera configuration."""
+class CLIPortCamera(object):
+    """CLIPort camera configuration."""
 
     image_size = (480, 640)
     intrinsics = (450., 0, 320., 0, 450., 240., 0, 0, 1)
@@ -170,6 +173,91 @@ def get_point_cloud(config, color, depth, segmentation=None):
     if segmentation is not None:
         return points, color.reshape(-1, color.shape[-1])[mask], segmentation.reshape(-1)[mask]
     return points, color.reshape(-1, color.shape[-1])[mask]
+
+
+def get_point_cloud_image(config: CameraConfig, depth: np.ndarray) -> np.ndarray:
+    """Reconstruct point clouds from the depth image. This function differs from the :func:`get_point_cloud` function in that it returns a point cloud "image",
+    that is, a 3D point for each pixel in the depth image.
+
+    Args:
+        config: camera configuration.
+        depth: depth image, of shape (H, W).
+
+    Returns:
+        points: point cloud image, of shape (H, W, 3).
+    """
+    intrinsics = np.array(config.intrinsics).reshape(3, 3)
+
+    height, width = depth.shape[0:2]
+    xlin = np.linspace(0, width - 1, width)
+    ylin = np.linspace(0, height - 1, height)
+    px, py = np.meshgrid(xlin, ylin)
+    px = (px - intrinsics[0, 2]) * (depth / intrinsics[0, 0])
+    py = (py - intrinsics[1, 2]) * (depth / intrinsics[1, 1])
+    points = np.float32([px, py, depth]).transpose(1, 2, 0)
+
+    position = np.array(config.position).reshape(3, 1)
+    rotation = np.array(p.getMatrixFromQuaternion(rpy(*config.rotation))).reshape(3, 3)
+    transform = np.eye(4)
+    transform[:3, :] = np.hstack((rotation, position))
+
+    padding = ((0, 0), (0, 0), (0, 1))
+    homogen_points = np.pad(
+        points.copy(), padding,
+        'constant', constant_values=1
+    )
+    for i in range(3):
+        points[..., i] = np.sum(transform[i, :] * homogen_points, axis=-1)
+
+    return points
+
+
+def get_orthographic_heightmap(pcd_image: np.ndarray, color_image: np.ndarray, bounds: np.ndarray, pixel_size: float, segmentation: Optional[np.ndarray] = None) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Get a top-down (z-axis) orthographic heightmap image from 3D pointcloud.
+
+    Args:
+        pcd_image: HxWx3 float array of 3D points in world coordinates.
+        color_image: HxWx3 uint8 array of values in range 0-255 aligned with points.
+        bounds: 3x2 float array of values (rows: X,Y,Z; columns: min,max) defining the region in 3D space to generate heightmap in world coordinates.
+        pixel_size: float defining size of each pixel in meters.
+        segmentation: HxW int32 array of segmentation mask aligned with points.
+
+    Returns:
+        heightmap: HxW float array of height (from lower z-bound) in meters.
+        colormap: HxWx3 uint8 array of backprojected color aligned with heightmap.
+        segmentation: HxW int32 array of backprojected segmentation mask aligned with heightmap.
+    """
+    if segmentation is not None:
+        color_image = np.concatenate((color_image, segmentation[..., None]), axis=2)
+
+    width = int(np.round((bounds[0, 1] - bounds[0, 0]) / pixel_size))
+    height = int(np.round((bounds[1, 1] - bounds[1, 0]) / pixel_size))
+    heightmap = np.zeros((height, width), dtype=np.float32)
+    colormap = np.zeros((height, width, color_image.shape[-1]), dtype=np.uint8)
+
+    # Filter out 3D points that are outside of the predefined bounds.
+    ix = (pcd_image[Ellipsis, 0] >= bounds[0, 0]) & (pcd_image[Ellipsis, 0] < bounds[0, 1])
+    iy = (pcd_image[Ellipsis, 1] >= bounds[1, 0]) & (pcd_image[Ellipsis, 1] < bounds[1, 1])
+    iz = (pcd_image[Ellipsis, 2] >= bounds[2, 0]) & (pcd_image[Ellipsis, 2] < bounds[2, 1])
+    valid = ix & iy & iz
+    pcd_image = pcd_image[valid]
+    color_image = color_image[valid]
+
+    # Sort 3D points by z-value, which works with array assignment to simulate
+    # z-buffering for rendering the heightmap image.
+    iz = np.argsort(pcd_image[:, -1])
+    pcd_image, color_image = pcd_image[iz], color_image[iz]
+    px = np.int32(np.floor((pcd_image[:, 0] - bounds[0, 0]) / pixel_size))
+    py = np.int32(np.floor((pcd_image[:, 1] - bounds[1, 0]) / pixel_size))
+    px = np.clip(px, 0, width - 1)
+    py = np.clip(py, 0, height - 1)
+    heightmap[py, px] = pcd_image[:, 2] - bounds[2, 0]
+    for c in range(color_image.shape[-1]):
+        colormap[py, px, c] = color_image[:, c]
+
+    if segmentation is not None:
+        return heightmap, colormap[..., :3], colormap[..., 3]
+    return heightmap, colormap
 
 
 def lookat_rpy(camera_pos: np.ndarray, target_pos: np.ndarray, roll: float = 0) -> np.ndarray:

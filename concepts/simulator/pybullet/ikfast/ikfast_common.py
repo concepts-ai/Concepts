@@ -30,9 +30,12 @@ class IKFastWrapper(object):
     def __init__(
         self,
         world: BulletWorld, module,
-        body_id, joint_ids: List[int], free_joint_ids: List[int],
+        body_id, joint_ids: List[int], free_joint_ids: List[int] = tuple(),
         use_xyzw: bool = True,  # PyBullet uses xyzw.
-        max_attempts: int = 1000
+        max_attempts: int = 1000,
+        fix_free_joint_positions: bool = True,
+        shuffle_solutions: bool = True,
+        sort_closest_solution: bool = False
     ):
         self.world = world
         self.module = module
@@ -50,10 +53,15 @@ class IKFastWrapper(object):
         self.free_joints_lower = np.array([info.joint_lower_limit for info in joint_info if info.joint_index in free_joint_ids])
         self.free_joints_upper = np.array([info.joint_upper_limit for info in joint_info if info.joint_index in free_joint_ids])
 
-        assert len(self.free_joint_ids) + 6 == len(self.joint_ids)
+        self.fix_free_joint_positions = fix_free_joint_positions
+        self.initial_free_joint_positions = self.get_current_free_joint_positions()
+        self.shuffle_solutions = shuffle_solutions
+        self.sort_closest_solution = sort_closest_solution
+
+        # assert len(self.free_joint_ids) + 6 == len(self.joint_ids)
 
     def fk(self, qpos: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        pos, mat = self.module.get_fk(qpos)
+        pos, mat = self.module.get_fk(list(qpos))
         quat = mat2quat(mat)
         if self.use_xyzw:
             return pos, quat[[1, 2, 3, 0]]
@@ -86,17 +94,23 @@ class IKFastWrapper(object):
             current_joint_positions = last_qpos
             current_free_joint_positions = [last_qpos[i] for i, joint_id in enumerate(self.joint_ids) if joint_id in self.free_joint_ids]
 
-        generator = itertools.chain([current_free_joint_positions], gen_uniform_sample_joints(self.free_joints_lower, self.free_joints_upper))
-        if max_attempts is not None:
-            generator = itertools.islice(generator, max_attempts)
+        if self.fix_free_joint_positions:
+            generator = [self.initial_free_joint_positions]
         else:
-            generator = itertools.islice(generator, self.max_attempts)
+            generator = itertools.chain([current_free_joint_positions], gen_uniform_sample_joints(self.free_joints_lower, self.free_joints_upper))
+            if max_attempts is not None:
+                generator = itertools.islice(generator, max_attempts)
+            else:
+                generator = itertools.islice(generator, self.max_attempts)
 
         succeeded = False
         for sampled in generator:
             solutions = self.ik_internal(pos, quat, sampled)
-            random.shuffle(solutions)
+            if self.shuffle_solutions:
+                random.shuffle(solutions)
+            sorted_solutions = list()
             for solution in solutions:
+                # print('Checking solution: ', solution, 'lower', self.joints_lower, 'upper', self.joints_upper, check_joint_limits(solution, self.joints_lower, self.joints_upper))
                 if check_joint_limits(solution, self.joints_lower, self.joints_upper):
                     if distance_fn(solution, current_joint_positions) < max_distance:
                         succeeded = True
@@ -104,9 +118,13 @@ class IKFastWrapper(object):
                         # fk_pos, fk_quat = self.fk(solution.tolist())
                         # print('query (inside): ', pos, quat, 'solution: ', solution, 'fk', fk_pos, fk_quat, 'fk_diff', np.linalg.norm(fk_pos - pos), quat_mul(quat_conjugate(fk_quat), quat)[3])
 
-                        yield solution
+                        sorted_solutions.append(solution)
                     elif verbose:
                         print(f'IK solution is too far from current joint positions: {solution} vs {current_joint_positions}')
+
+            if self.sort_closest_solution:
+                sorted_solutions.sort(key=lambda qpos: distance_fn(qpos, current_joint_positions))
+            yield from sorted_solutions
 
         if not succeeded and max_attempts is None:
             logger.warning(f'Failed to find IK solution for {pos} {quat} after {self.max_attempts} attempts.')

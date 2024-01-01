@@ -160,7 +160,7 @@ class Vocab(object):
         return str_sequence
 
 
-def gen_vocab(dataset, keys=None, extra_words=None, cls=None, single_word=False):
+def gen_vocab(dataset: Sequence, keys: Optional[Iterable[str]] = None, extra_words: Optional[Iterable[str]] = None, cls: type = None, single_word: bool = False):
     """Generate a Vocabulary instance from a dataset.
 
     By default, this function will retrieve the data using the `get_metainfo` function,
@@ -175,6 +175,14 @@ def gen_vocab(dataset, keys=None, extra_words=None, cls=None, single_word=False)
     By default, this function will add four additional tokens:
     EBD_PAD, EBD_BOS, EBD_EOS, and EBD_UNK. Users can specify additional extra tokens using the
     extra_words argument.
+
+    Args:
+        dataset: the dataset to generate the vocabulary from. It can be a list of strings or a dataset instance.
+        keys: the keys to retrieve from the dataset items. If not specified, the dataset is assumed to be a list of strings.
+        extra_words: additional words to add to the vocabulary.
+        cls: the class of the Vocabulary instance to generate.
+        single_word: whether to treat the entries in the dataset as single words. Default to False. When set to False, the entries should either be a list of
+            strings or a single string (in which case it will be split by spaces).
     """
     if cls is None:
         cls = Vocab
@@ -214,7 +222,7 @@ def gen_vocab(dataset, keys=None, extra_words=None, cls=None, single_word=False)
     return vocab
 
 
-def gen_vocab_from_words(words, extra_words=None, cls=None):
+def gen_vocab_from_words(words: Sequence[str], extra_words: Optional[Iterable[str]] = None, cls: type = None):
     """Generate a Vocabulary instance from a list of words."""
     if cls is None:
         cls = Vocab

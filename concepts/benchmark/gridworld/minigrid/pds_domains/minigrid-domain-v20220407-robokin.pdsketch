@@ -1,0 +1,91 @@
+(define
+(domain minigrid-v20220407-envaction-robokin)
+(:requirements :pdsketch-v2-1)
+
+(:types
+    robot item - object
+    pose - vector[float32, 2]
+    direction - vector[int64, 1]
+)
+
+(:predicates
+    (robot-pose [return_type=pose] ?r - robot)
+    (robot-direction [return_type=direction] ?r - robot)
+
+    (facing [return_type=pose] ?p - pose ?d - direction)
+    (direction-left [return_type=direction] ?d - direction)
+    (direction-right [return_type=direction] ?d - direction)
+)
+
+(:feature item-pose [group="augmented"]
+    :parameters (?o - item)
+    :output (pose)
+)
+(:feature item-image [group="augmented-input"]
+    :parameters (?o - item)
+    :output (vector[float32, 6])
+)
+(:feature item-feature [group="augmented"]
+    :parameters (?o - item)
+    :output (vector[float32, 64])
+    :expr (??f (item-image ?o))
+)
+
+(:derived (_is-facing ?p - pose ?d - direction ?t - pose)
+    (equal (facing ?p ?d) ?t)
+)
+(:derived (_robot-facing [return_type=pose] ?r - robot)
+    (facing (robot-pose ?r) (robot-direction ?r))
+)
+(:derived (_robot-is-facing ?r - robot ?o - item)
+    (_is-facing (robot-pose ?r) (robot-direction ?r) (item-pose ?o))
+)
+(:derived (_robot-facing-clear ?r - robot)
+    (not (exists (?o - item) (_robot-is-facing ?r ?o)))
+)
+
+(:derived (robot-feature [return_type=vector[float32, 19]] ?r - robot)
+    (??f (robot-pose ?r) (robot-direction ?r))
+)
+(:derived (robot-holding   [group="goal"] ?r - robot ?o - item) (??f (robot-feature ?r) (item-pose ?o) (item-feature ?o)))
+(:derived (robot-is-facing [group="goal"] ?r - robot ?o - item) (??f (robot-feature ?r) (item-pose ?o) (item-feature ?o)))
+
+(:derived (is-red    [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-green  [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-blue   [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-purple [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-yellow [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-grey   [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-key    [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-ball   [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-box    [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-door   [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-open   [group="goal"] ?o - item) (??f (item-feature ?o)))
+
+(:action forward
+    :parameters (?r - robot)
+    :precondition (_robot-facing-clear ?r)
+    :effect (and (robot-pose::assign ?r (_robot-facing ?r)) )
+)
+(:action lturn
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and (robot-direction::assign ?r (direction-left (robot-direction ?r))) )
+)
+(:action rturn
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and (robot-direction::assign ?r (direction-right (robot-direction ?r))) )
+)
+(:action pickup
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (forall (?o - item)
+            (item-pose::assign ?o (??f
+                (robot-feature ?r) (item-pose ?o) (item-feature ?o)
+            ))
+        )
+    )
+)
+)

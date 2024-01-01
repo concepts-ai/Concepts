@@ -589,6 +589,9 @@ class BulletWorld(object):
         else:
             p.changeVisualShape(body_id, link_id, rgbaColor=rgba, physicsClientId=self.client_id)
 
+    def change_dynamics(self, body_id: int, mass: float, lateral_friction: float, link_id: int = -1):
+        p.changeDynamics(body_id, link_id, mass=mass, lateralFriction=lateral_friction, physicsClientId=self.client_id)
+
     def get_body_state_by_id(self, body_id: int) -> BodyState:
         state = p.getBasePositionAndOrientation(body_id, physicsClientId=self.client_id)
         vel = p.getBaseVelocity(body_id, physicsClientId=self.client_id)
@@ -682,8 +685,7 @@ class BulletWorld(object):
                     kwargs['body' + name] = value
                 elif isinstance(value, (tuple, list)):
                     kwargs['body' + name], kwargs['linkIndex' + name] = value
-                else:
-                    assert isinstance(value, six.string_types)
+                elif isinstance(value, str):
                     value = self.global_names[value]
                     if value[0] == 'body':
                         kwargs['body' + name] = value[1]
@@ -691,6 +693,8 @@ class BulletWorld(object):
                         kwargs['body' + name], kwargs['linkIndex' + name] = value[1:]
                     else:
                         raise ValueError('get_contact API only allows the specification of body or link.')
+                else:
+                    raise TypeError(f'get_contact API only allows the specification of body or link: got {value}')
 
         update_kwargs('A', a)
         update_kwargs('B', b)
@@ -723,7 +727,7 @@ class BulletWorld(object):
     def save_bodies(self, body_identifiers: List[Union[str, int]]) -> GroupSaver:
         return GroupSaver([self.save_body(b) for b in body_identifiers])
 
-    def render_image(self, config: CameraConfig, image_size: Optional[Tuple[int, int]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def render_image(self, config: CameraConfig, image_size: Optional[Tuple[int, int]] = None, normalize_depth: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         view_matrix, proj_matrix = config.get_view_and_projection_matricies(image_size)
         image_size = image_size if image_size is not None else config.image_size
         znear, zfar = config.zrange
@@ -747,9 +751,12 @@ class BulletWorld(object):
         # Get depth image.
         depth_image_size = (image_size[0], image_size[1])
         zbuffer = np.asarray(depth).reshape(depth_image_size)
-        depth = zbuffer
-        # depth = (zfar + znear - (2. * zbuffer - 1.) * (zfar - znear))
-        # depth = (2. * znear * zfar) / depth
+
+        if normalize_depth:
+            depth = (zfar + znear - (2. * zbuffer - 1.) * (zfar - znear))
+            depth = (2. * znear * zfar) / depth
+        else:
+            depth = zbuffer
 
         # Get segmentation image.
         segm = np.uint8(segm).reshape(depth_image_size)

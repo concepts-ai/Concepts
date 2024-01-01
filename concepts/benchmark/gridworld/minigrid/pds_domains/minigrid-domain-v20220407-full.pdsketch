@@ -1,0 +1,126 @@
+(define
+(domain minigrid-v20220407-envaction-full)
+(:requirements :pdsketch-v2-1)
+
+(:types
+    robot item - object
+    pose - vector[float32, 2]
+    direction - vector[int64, 1]
+)
+
+(:predicates
+    (robot-holding ?r - robot ?o - item)
+    (pickable ?o - item)
+    (toggleable ?o - item)
+
+    (robot-pose [state=true] ?r - robot -> pose)
+    (robot-direction [state=true] ?r - robot -> direction)
+    (item-pose [state=true] ?o - item -> pose)
+
+    (item-image [observation=true, state=false] ?o - item -> vector[float32, 3])
+
+    ;; dummy function for returning an empty pose vector.
+    (empty-pose -> pose)
+    (facing ?p - pose ?d - direction -> pose)
+    (direction-left ?d - direction -> direction)
+    (direction-right ?d - direction -> direction)
+)
+
+(:derived (item-type [state=true] ?o - item -> vector[float32, 32])  ;; box, door, etc.
+    (??f (item-image ?o))
+)
+(:derived (item-color[state=true] ?o - item -> vector[float32, 32])  ;; red, green, etc.
+    (??f (item-image ?o))
+)
+(:derived (item-state [state=true] ?o - item -> vector[float32, 32])  ;; open, closed.
+    (??f (item-image ?o))
+)
+
+(:derived (is-facing ?p - pose ?d - direction ?t - pose)
+    (equal (facing ?p ?d) ?t)
+)
+(:derived (hands-free ?r - robot)
+    (not (exists (?o - item) (robot-holding ?r ?o)))
+)
+(:derived (pose-free ?p - pose)
+    (not (exists (?o - item) (equal (item-pose ?o) ?p)))
+)
+(:derived (robot-facing [return_type=pose] ?r - robot)
+    (facing (robot-pose ?r) (robot-direction ?r))
+)
+(:derived (robot-is-facing ?r - robot ?o - item)
+    (is-facing (robot-pose ?r) (robot-direction ?r) (item-pose ?o))
+)
+(:derived (robot-facing-clear ?r - robot)
+    (not (exists (?o - item) (robot-is-facing ?r ?o)))
+)
+
+(:derived (is-red    ?o - item) (??f (item-color ?o)))
+(:derived (is-green  ?o - item) (??f (item-color ?o)))
+(:derived (is-blue   ?o - item) (??f (item-color ?o)))
+(:derived (is-purple ?o - item) (??f (item-color ?o)))
+(:derived (is-yellow ?o - item) (??f (item-color ?o)))
+(:derived (is-grey   ?o - item) (??f (item-color ?o)))
+
+(:derived (is-key  ?o - item) (??f (item-type ?o)))
+(:derived (is-ball ?o - item) (??f (item-type ?o)))
+(:derived (is-box  ?o - item) (??f (item-type ?o)))
+(:derived (is-door ?o - item) (??f (item-type ?o)))
+
+(:derived (is-open ?o - item) (??f (item-state ?o)))
+
+(:action forward
+    :parameters (?r - robot)
+    :precondition (robot-facing-clear ?r)
+    :effect (and
+        (robot-pose::assign ?r (robot-facing ?r))
+    )
+)
+(:action lturn
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (robot-direction::assign ?r (direction-left (robot-direction ?r)))
+    )
+)
+(:action rturn
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (robot-direction::assign ?r (direction-right (robot-direction ?r)))
+    )
+)
+(:action pickup
+    :parameters (?r - robot ?o - item)
+    :precondition (and
+        (hands-free ?r)
+        (robot-is-facing ?r ?o)
+        (pickable ?o)
+    )
+    :effect (and
+        +(robot-holding ?r ?o)
+        (item-pose::assign ?o (empty-pose))
+    )
+)
+(:action place
+    :parameters (?r - robot ?o - item)
+    :precondition (and
+        (robot-holding ?r ?o)
+        (pickable ?o)
+    )
+    :effect (and
+        -(robot-holding ?r ?o)
+        (item-pose::assign ?o (robot-facing ?r))
+    )
+)
+(:action toggle
+    :parameters (?r - robot ?o - item)
+    :precondition (and
+        (robot-is-facing ?r ?o)
+        (toggleable ?o)
+    )
+    :effect (and
+        (item-state::assign ?o (??f (item-type ?o) (item-color ?o) (item-state ?o)))
+    )
+)
+)

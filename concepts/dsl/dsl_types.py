@@ -16,6 +16,8 @@ All types extend the base class :class:`TypeBase`.
 
     - :class:`ObjectType`: corresponds to an object in the physical world.
     - :class:`ValueType`: corresponds to an encoding of a feature of the object.
+    - :class:`UnionType`: corresponds to a union of types.
+    - :class:`ListType`: corresponds to a list type.
     - :class:`~concepts.dsl.dsl_functions.FunctionType`: corresponds to a function over the encodings.
     - :class:`~concepts.dsl.dsl_functions.OverloadedFunctionType`: corresponds to a collection of functions that share the same name.
 
@@ -42,7 +44,7 @@ logger = get_logger(__file__)
 __all__ = [
     'FormatContext', 'get_format_context',
     'TypeBase', 'UnionType', 'ObjectType', 'ValueType',
-    'AutoType', 'AnyType', 'UnionTyping', 'is_any_type', 'is_auto_type',  # Special types and type constructors.
+    'AutoType', 'AnyType', 'UnionTyping', 'ListType', 'is_any_type', 'is_auto_type',  # Special types and type constructors.
     'TensorValueTypeBase', 'PyObjValueType', 'ConstantType', 'SequenceValueType',  # Derived from ValueType.
     'ScalarValueType', 'BOOL', 'INT64', 'FLOAT32', 'VectorValueType', 'NamedTensorValueType',  # Derived from TensorValueTypeBase.
     'QINDEX', 'Variable', 'ObjectConstant', 'UnnamedPlaceholder'  # Placeholder-like objects.
@@ -109,6 +111,11 @@ class TypeBase(object):
         """Return the typename of the parent type."""
         return self._parent_type.typename
 
+    @property
+    def is_list_type(self):
+        """Return whether the type is a list type."""
+        return False
+
     def __str__(self) -> str:
         if get_format_context().type_format_cls:
             return self.long_str()
@@ -127,10 +134,18 @@ class TypeBase(object):
         """Return the long string representation of the type."""
         return f'Type[{self.short_str()}]'
 
-    def downcast_compatible(self, other: 'TypeBase') -> bool:
-        """Check if the type is downcast-compatible with another type.
-        That is, if the type is a subtype of the other type.
+    def downcast_compatible(self, other: 'TypeBase', allow_self_list: bool = False, allow_list: bool = False) -> bool:
+        """Check if the type is downcast-compatible with the other type; that is, if this type is a subtype of the other type.
+
+        Args:
+            other: the other type.
+            allow_self_list: if True, this type can be a list type derived from the other type.
+            allow_list: if True, the other type can be a list type derived from the type.
         """
+        if allow_self_list and isinstance(self, ListType):
+            return self.element_type.typename == other.typename or self.element_type == AnyType or self.element_type == AutoType
+        if allow_list and isinstance(other, ListType):
+            return self.typename == other.element_type.typename or self == AnyType or self == AutoType
         return self.typename == other.typename or self == AnyType or self == AutoType
 
     def __eq__(self, other: 'TypeBase') -> bool:
@@ -183,7 +198,7 @@ class UnionType(TypeBase):
     def long_str(self) -> str:
         return 'Union[' + ', '.join(t.long_str() for t in self.types) + ']'
 
-    def downcast_compatible(self, other: TypeBase) -> bool:
+    def downcast_compatible(self, other: TypeBase, allow_self_list: bool = False, allow_list: bool = False) -> bool:
         raise NotImplementedError('Cannot downcast to a union type.')
 
 
@@ -476,6 +491,19 @@ class NamedTensorValueType(TensorValueTypeBase):
         return hash(self.typename)
 
 
+class ListType(TypeBase):
+    def __init__(self, element_type: TypeBase, alias: Optional[str] = None):
+        super().__init__(f'List[{element_type.typename}]', alias=alias)
+        self.element_type = element_type
+
+    element_type: TypeBase
+    """The element type of the list."""
+
+    @property
+    def is_list_type(self):
+        return True
+
+
 QINDEX = slice(None)
 """The "quantified index" object, used to indicate a quantified dimension in a tensor value type. Internally it is `slice(None)`."""
 
@@ -531,7 +559,7 @@ class ObjectConstant(_Placeholder):
     name: str
     """The name of the constant."""
 
-    dtype: ObjectType
+    dtype: Union[ObjectType, ValueType]
     """The data type of the constant."""
 
 

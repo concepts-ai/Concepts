@@ -316,12 +316,12 @@ class TensorValue(ValueBase):
     # Simple creation.
 
     @classmethod
-    def from_tensor(cls, value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[Iterable[str]] = None) -> 'TensorValue':
-        return from_tensor(value, dtype, batch_variables)
+    def from_tensor(cls, value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[Iterable[str]] = None, batch_dims: int = 0) -> 'TensorValue':
+        return from_tensor(value, dtype, batch_variables, batch_dims)
 
     @classmethod
-    def from_tensorized_pyobj(cls, value: TensorizedPyObjValues, dtype: Optional[PyObjValueType] = None, batch_variables: Optional[Iterable[str]] = None) -> 'TensorValue':
-        return from_tensorized_pyobj(value, dtype, batch_variables)
+    def from_tensorized_pyobj(cls, value: TensorizedPyObjValues, dtype: Optional[PyObjValueType] = None, batch_variables: Optional[Iterable[str]] = None, batch_dims: int = 0) -> 'TensorValue':
+        return from_tensorized_pyobj(value, dtype, batch_variables, batch_dims)
 
     @classmethod
     def from_values(cls, *args: Any, dtype: Optional[TensorValueTypeBase] = None) -> 'TensorValue':
@@ -382,6 +382,14 @@ class TensorValue(ValueBase):
         if self.is_tensorized_pyobj:
             return self.tensor.values.item()
         return self.tensor
+
+    def has_optimistic_value(self) -> bool:
+        return self.tensor_optimistic_values is not None and self.tensor_optimistic_values.any()
+
+    def is_single_optimistic_value(self) -> bool:
+        from .constraint import is_optimistic_value
+
+        return self.tensor_optimistic_values is not None and self.is_single_elem and is_optimistic_value(self.tensor_optimistic_values.item())
 
     def fast_index(self, arguments: Tuple[int, ...], wrap: bool = True) -> Union[torch.Tensor, Any, 'OptimisticValue']:
         from .constraint import is_optimistic_value, OptimisticValue
@@ -572,20 +580,20 @@ def _maybe_clone_tensor(tensor: Optional[Union[torch.Tensor, TensorizedPyObjValu
     return tensor if tensor is None else tensor.clone()
 
 
-def from_tensor(value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[List[str]] = None) -> TensorValue:
+def from_tensor(value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[List[str]] = None, batch_dims: int = 0) -> TensorValue:
     if dtype is None:
         dtype = TensorValueTypeBase.from_tensor(value)
     if batch_variables is None:
         batch_variables = list()
-    return TensorValue(dtype, batch_variables, value)
+    return TensorValue(dtype, batch_variables, value, batch_dims=batch_dims)
 
 
-def from_tensorized_pyobj(value: TensorizedPyObjValues, dtype: Optional[PyObjValueType] = None, batch_variables: Optional[List[str]] = None) -> TensorValue:
+def from_tensorized_pyobj(value: TensorizedPyObjValues, dtype: Optional[PyObjValueType] = None, batch_variables: Optional[List[str]] = None, batch_dims: int = 0) -> TensorValue:
     if dtype is None:
         dtype = PyObjValueType(value.dtype.pyobj_type, value.dtype.shape)
     if batch_variables is None:
         batch_variables = len(value.shape)
-    return TensorValue(dtype, batch_variables, value)
+    return TensorValue(dtype, batch_variables, value, batch_dims=batch_dims)
 
 
 def vector_values(*args: Any, dtype: Optional[TensorValueTypeBase] = None) -> TensorValue:

@@ -205,14 +205,19 @@ class BulletClient(object):
         with self.disable_rendering(suppress_stdout=True):
             yield
 
-    def step(self, steps=1):
+    def step(self, steps=1, realtime_rendering=False):
         clock = None
-        if self.render_fps > 0:
-            clock = jacinle.Clock(1 / self.render_fps)
+        if realtime_rendering:
+            if self.render_fps > 0:
+                clock = jacinle.Clock(1 / self.render_fps)
         for i in range(steps):
             p.stepSimulation(physicsClientId=self.client_id)
-            if self.render_fps > 0:
+            self._additional_step()
+            if clock is not None:
                 clock.tick()
+
+    def _additional_step(self):
+        pass
 
     def perform_collision_detection(self):
         p.performCollisionDetection(physicsClientId=self.client_id)

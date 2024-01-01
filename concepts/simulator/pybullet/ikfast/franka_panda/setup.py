@@ -8,7 +8,6 @@
 # This file is part of HACL-PyTorch.
 # Distributed under terms of the MIT license.
 
-import sys
 from concepts.simulator.pybullet.ikfast.compile import compile_ikfast
 
 

@@ -1,0 +1,77 @@
+(define
+(domain minigrid-v20220407-envaction-basic)
+(:requirements :pdsketch-v2-1)
+
+(:types
+    robot item - object
+)
+
+(:feature robot-image [group="augmented-input"]
+    :parameters (?r - robot)
+    :output (vector[float32, 3])
+)
+(:feature robot-feature [group="augmented"]
+    :parameters (?r - robot)
+    :output (vector[float32, 64])
+    :expr (??f (robot-image ?r))
+)
+(:feature item-image [group="augmented-input"]
+    :parameters (?o - item)
+    :output (vector[float32, 6])
+)
+(:feature item-feature [group="augmented"]
+    :parameters (?o - item)
+    :output (vector[float32, 64])
+    :expr (??f (item-image ?o))
+)
+
+(:derived (robot-holding   [group="goal"] ?r - robot ?o - item) (??f (robot-feature ?r) (item-feature ?o)))
+(:derived (robot-is-facing [group="goal"] ?r - robot ?o - item) (??f (robot-feature ?r) (item-feature ?o)))
+
+(:derived (is-red    [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-green  [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-blue   [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-purple [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-yellow [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-grey   [group="goal"] ?o - item) (??f (item-feature ?o)))
+
+(:derived (is-key    [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-ball   [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-box    [group="goal"] ?o - item) (??f (item-feature ?o)))
+(:derived (is-door   [group="goal"] ?o - item) (??f (item-feature ?o)))
+
+(:derived (is-open   [group="goal"] ?o - item) (??f (item-feature ?o)))
+
+(:action forward
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (robot-feature::assign ?r (??f (robot-feature ?r) (item-feature ??)))
+    )
+)
+(:action lturn
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (robot-feature::assign ?r (??f (robot-feature ?r)))
+    )
+)
+(:action rturn
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (robot-feature::assign ?r (??f (robot-feature ?r)))
+    )
+)
+(:action pickup
+    :parameters (?r - robot)
+    :precondition (and )
+    :effect (and
+        (forall (?o - item)
+            (item-feature::assign ?o (??f
+                (robot-feature ?r) (item-feature ?o)
+            ))
+        )
+    )
+)
+)

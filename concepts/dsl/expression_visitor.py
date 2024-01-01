@@ -10,10 +10,12 @@
 
 """A visitor for iterating over expressions."""
 
-from typing import Any
+from typing import Any, Union
 
 import concepts.dsl.expression as E
 from concepts.dsl.expression import Expression
+
+__all__ = ['ExpressionVisitor', 'IdentityExpressionVisitor']
 
 
 class ExpressionVisitor(object):
@@ -34,6 +36,12 @@ class ExpressionVisitor(object):
             return self.visit_object_constant_expression(expr)
         elif isinstance(expr, E.ConstantExpression):
             return self.visit_constant_expression(expr)
+        elif isinstance(expr, E.ListCreationExpression):
+            return self.visit_list_creation_expression(expr)
+        elif isinstance(expr, E.ListExpansionExpression):
+            return self.visit_list_expansion_expression(expr)
+        elif isinstance(expr, E.ListFunctionApplicationExpression):
+            return self.visit_list_function_application_expression(expr)
         elif isinstance(expr, E.FunctionApplicationExpression):
             return self.visit_function_application_expression(expr)
         elif isinstance(expr, E.ConditionalSelectExpression):
@@ -66,7 +74,16 @@ class ExpressionVisitor(object):
     def visit_constant_expression(self, expr: E.ConstantExpression) -> Any:
         raise NotImplementedError()
 
+    def visit_list_creation_expression(self, expr: E.ListCreationExpression) -> Any:
+        raise NotImplementedError()
+
+    def visit_list_expansion_expression(self, expr: E.ListExpansionExpression) -> Any:
+        raise NotImplementedError()
+
     def visit_function_application_expression(self, expr: E.FunctionApplicationExpression) -> Any:
+        raise NotImplementedError()
+
+    def visit_list_function_application_expression(self, expr: E.ListFunctionApplicationExpression) -> Any:
         raise NotImplementedError()
 
     def visit_conditional_select_expression(self, expr: E.ConditionalSelectExpression) -> Any:
@@ -95,4 +112,54 @@ class ExpressionVisitor(object):
 
     def visit_deictic_assign_expression(self, expr: E.DeicticAssignExpression) -> Any:
         raise NotImplementedError()
+
+
+class IdentityExpressionVisitor(ExpressionVisitor):
+    def visit_variable_expression(self, expr: E.VariableExpression) -> E.VariableExpression:
+        return type(expr)(expr.variable)
+
+    def visit_function_application_expression(self, expr: Union[E.FunctionApplicationExpression, E.ListFunctionApplicationExpression]) -> Union[E.FunctionApplicationExpression, E.ListFunctionApplicationExpression]:
+        return type(expr)(expr.function, [self.visit(e) for e in expr.arguments])
+
+    def visit_list_creation_expression(self, expr: E.ListCreationExpression) -> E.ListCreationExpression:
+        return type(expr)([self.visit(e) for e in expr.arguments])
+
+    def visit_list_expansion_expression(self, expr: E.ListExpansionExpression) -> E.ListExpansionExpression:
+        return type(expr)(self.visit(expr.expression))
+
+    def visit_list_function_application_expression(self, expr: E.ListFunctionApplicationExpression) -> E.ListFunctionApplicationExpression:
+        return type(expr)(expr.function, [self.visit(e) for e in expr.arguments])
+
+    def visit_bool_expression(self, expr: E.BoolExpression) -> E.BoolExpression:
+        return E.BoolExpression(expr.bool_op, [self.visit(child) for child in expr.arguments])
+
+    def visit_quantification_expression(self, expr: E.QuantificationExpression) -> E.QuantificationExpression:
+        return E.QuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expr))
+
+    def visit_generalized_quantification_expression(self, expr: E.GeneralizedQuantificationExpression) -> E.GeneralizedQuantificationExpression:
+        return E.GeneralizedQuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expr), return_type=expr.return_type)
+
+    def visit_predicate_equal_expression(self, expr: E.PredicateEqualExpression) -> E.PredicateEqualExpression:
+        return type(expr)(self.visit(expr.predicate), self.visit(expr.value))
+
+    def visit_assign_expression(self, expr: E.AssignExpression) -> E.AssignExpression:
+        return type(expr)(self.visit(expr.predicate), self.visit(expr.value))
+
+    def visit_conditional_select_expression(self, expr: E.ConditionalSelectExpression) -> E.ConditionalSelectExpression:
+        return type(expr)(self.visit(expr.predicate), self.visit(expr.condition))
+
+    def visit_deictic_select_expression(self, expr: E.DeicticSelectExpression) -> E.DeicticSelectExpression:
+        return type(expr)(expr.variable, self.visit(expr.expression))
+
+    def visit_conditional_assign_expression(self, expr: E.ConditionalAssignExpression) -> E.ConditionalAssignExpression:
+        return type(expr)(self.visit(expr.predicate), self.visit(expr.value), self.visit(expr.condition))
+
+    def visit_deictic_assign_expression(self, expr: E.DeicticAssignExpression) -> E.DeicticAssignExpression:
+        return type(expr)(expr.variable, self.visit(expr.expr))
+
+    def visit_constant_expression(self, expr: Expression) -> Expression:
+        return expr
+
+    def visit_object_constant_expression(self, expr: Expression) -> Expression:
+        return expr
 

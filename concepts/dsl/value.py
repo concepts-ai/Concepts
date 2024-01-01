@@ -10,12 +10,12 @@
 
 """The baseclass for all value representations of domain-specific languages."""
 
-from typing import Any, Union
+from typing import Any, Union, Sequence
 
-from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType
+from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, ListType
 from concepts.dsl.dsl_types import get_format_context
 
-__all__ = ['ValueBase', 'Value']
+__all__ = ['ValueBase', 'Value', 'ListValue']
 
 
 class ValueBase(object):
@@ -65,3 +65,42 @@ class Value(ValueBase):
 
     def __repr__(self):
         return f'V({self.value}, dtype={self.dtype})'
+
+
+class ListValue(ValueBase):
+    """A list of values."""
+
+    dtype: ListType
+    """The type of the value."""
+
+    @property
+    def element_type(self):
+        return self.dtype.element_type
+
+    values: tuple
+    """The values."""
+
+    def __init__(self, dtype: ListType, values: Sequence[Any]):
+        """Initialize the Value object.
+
+        Args:
+            dtype: the type of the value.
+            values: the values.
+        """
+        super().__init__(dtype)
+        self.values = tuple(values)
+
+    def __len__(self):
+        return len(self.values)
+
+    def __str__(self):
+        elements_str = ', '.join(str(v) for v in self.values)
+        if get_format_context().object_format_type:
+            return f'LV({{{elements_str}}}, dtype={self.dtype})'
+        else:
+            return f'{{{elements_str}}}'
+
+    def __repr__(self):
+        elements_str = ', '.join(str(v) for v in self.values)
+        return f'LV({{{elements_str}}}, dtype={self.dtype})'
+

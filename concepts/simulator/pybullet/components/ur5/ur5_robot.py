@@ -10,6 +10,7 @@
 
 import time
 import contextlib
+import itertools
 import numpy as np
 import pybullet as p
 import jacinle
@@ -18,7 +19,7 @@ from typing import Optional, Tuple, Union
 from concepts.simulator.pybullet.client import BulletClient
 from concepts.simulator.pybullet.components.robot_base import Robot, Gripper, GripperObjectIndices, RobotActionPrimitive
 from concepts.simulator.pybullet.components.ur5.ur5_gripper import UR5GripperType
-from concepts.simulator.pybullet.rotation_utils import compose_transformation
+from concepts.simulator.pybullet.rotation_utils import compose_transformation, rotate_vector, quat_mul, quat_conjugate
 
 __all__ = ['UR5Robot', 'UR5ReachAndPick', 'UR5ReachAndPlace', 'UR5PlanarMove']
 
@@ -48,7 +49,10 @@ class UR5Robot(Robot):
 
         ur5_joints = client.w.get_joint_info_by_body(self.ur5)
         self.ur5_joints = [joint.joint_index for joint in ur5_joints if joint.joint_type == p.JOINT_REVOLUTE]
+        self.ur5_joints_lower = np.array([-3 * np.pi / 2, -2.3562, -17, -17, -17, -17], dtype=np.float32)
+        self.ur5_joints_upper = np.array([-np.pi / 2, 0, 17, 17, 17, 17], dtype=np.float32)
         self.ur5_ee_tip = 10
+        self.ik_fast_wrapper = None
 
         gripper_cls = self.gripper_type.get_class()
         self.gripper: Optional[Gripper] = None
@@ -91,8 +95,8 @@ class UR5Robot(Robot):
         if self.gripper is not None:
             self.gripper.release()
 
-    def get_ee_pose(self) -> Tuple[np.ndarray, np.ndarray]:
-        state = self.world.get_link_state_by_id(self.ur5, self.ur5_ee_tip)
+    def get_ee_pose(self, fk: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        state = self.world.get_link_state_by_id(self.ur5, self.ur5_ee_tip, fk=fk)
         return state.position, state.orientation
 
     def get_ee_home_pos(self) -> np.ndarray:
@@ -105,13 +109,21 @@ class UR5Robot(Robot):
         return self.gripper.activated if self.gripper is not None else None
 
     def fk(self, qpos: np.ndarray, link_name_or_id: Optional[Union[str, int]] = None) -> Tuple[np.ndarray, np.ndarray]:
+        if link_name_or_id is None:
+            link_id = self.ur5_ee_tip
+        elif isinstance(link_name_or_id, str):
+            link_id = self.client.world.get_link_index_with_body(self.ur5, link_name_or_id)
+        else:
+            link_id = link_name_or_id
+
         with self.world.save_body(self.ur5):
             self.set_qpos(qpos)
-            state = self.world.get_link_state_by_id(self.ur5, self.ur5_ee_tip)
+            state = self.world.get_link_state_by_id(self.ur5, link_id)
             return state.position, state.orientation
 
     def ik_pybullet(self, pos: np.ndarray, quat: np.ndarray, force: bool = False, verbose: bool = False) -> Optional[np.ndarray]:
         """Calculate joint configuration with inverse kinematics."""
+        rest_poses = type(self).UR5_JOINT_HOMES.tolist()
         joints = self.client.p.calculateInverseKinematics(
             bodyUniqueId=self.ur5,
             endEffectorLinkIndex=self.ur5_ee_tip,
@@ -120,7 +132,7 @@ class UR5Robot(Robot):
             lowerLimits=[-3 * np.pi / 2, -2.3562, -17, -17, -17, -17],
             upperLimits=[-np.pi / 2, 0, 17, 17, 17, 17],
             jointRanges=[np.pi, 2.3562, 34, 34, 34, 34],  # * 6,
-            restPoses=type(self).UR5_JOINT_HOMES.tolist(),
+            restPoses=rest_poses,
             maxNumIterations=100,
             residualThreshold=1e-5,
         )
@@ -128,24 +140,68 @@ class UR5Robot(Robot):
         joints[2:] = (joints[2:] + np.pi) % (2 * np.pi) - np.pi
         return joints
 
-    def ikfast(
-        self,
-        pos: np.ndarray,
-        quat: np.ndarray,
-        last_qpos: Optional[np.ndarray] = None,
-        max_attempts: int = 1000,
-        max_distance: float = float('inf'),
-        error_on_fail: bool = True,
-        verbose: bool = False
-    ) -> Optional[np.ndarray]:
-        raise NotImplementedError('IKFast is not implemented for UR5.')
+    def _init_ikfast(self):
+        if self.ik_fast_wrapper is None:
+            from concepts.simulator.pybullet.ikfast.ikfast_common import IKFastWrapper
+            import concepts.simulator.pybullet.ikfast.ur5.ikfast_ur5 as ikfast_module
+            self.ik_fast_wrapper = IKFastWrapper(
+                self.world, ikfast_module,
+                body_id=self.ur5,
+                joint_ids=self.ur5_joints,
+                shuffle_solutions=False,
+                use_xyzw=True
+            )
 
-    def move_qpos(self, targj, speed=0.01, timeout=10):
+    def ikfast(self, pos: np.ndarray, quat: np.ndarray, last_qpos: Optional[np.ndarray] = None, max_attempts: int = 1000, max_distance: float = float('inf'), error_on_fail: bool = True, verbose: bool = False) -> Optional[np.ndarray]:
+        self._init_ikfast()
+
+        if verbose:
+            print('Solving IK for pos:', pos, 'quat:', quat)
+
+        # NB(Jiayuan Mao @ 2023/08/09): relative transformation between the base and the end-effector.
+        # inner_pos = np.array((0, 0, 0), dtype=np.float32)
+        # inner_quat = np.array((0, 0, 0, 1), dtype=np.float32)
+        inner_pos, inner_quat = pos, quat
+
+        body_state = self.world.get_body_state_by_id(self.ur5)
+        inner_pos = inner_pos - np.array(body_state.position)
+        inner_quat = quat_mul(inner_quat, quat_conjugate([0.70704, -0.70703, -0.01, 0.01023]))
+        if not np.allclose(body_state.orientation, [0, 0, 0, 1]):
+            # TODO(Jiayuan Mao @ 2022/12/27): solve when orientation != identity.
+            raise NotImplementedError('IKFast does not support non-identity orientation for the robot yet.')
+
+        try:
+            ik_solution = list(itertools.islice(self.ik_fast_wrapper.gen_ik(inner_pos, inner_quat, last_qpos=last_qpos, max_attempts=max_attempts, max_distance=max_distance, verbose=False), 1))[0]
+        except IndexError:
+            if error_on_fail:
+                raise
+            return None
+
+        if verbose:
+            print('IK (solution, lower, upper):\n', np.stack([ik_solution, self.ur5_joints_lower, self.ur5_joints_upper], axis=0), sep='')
+            print('FK:', self.fk(ik_solution))
+
+        # fk_pos, fk_quat = self.fk(ik_solution, 'panda/tool_link')
+        # link8_pos, link8_quat = self.fk(ik_solution, 'panda/panda_link8')
+        # print('query (outer):', pos, quat, 'solution:', ik_solution, 'fk', fk_pos, fk_quat, 'fk_diff', np.linalg.norm(fk_pos - pos), quat_mul(quat_conjugate(fk_quat), quat)[3])
+        # print('query (outer):', 'link8 IN', link8_pos, link8_quat)
+        # print('query (outer):', 'linkT IN', fk_pos, fk_quat)
+        # print('query (outer):', 'linkT OT', link8_pos + rotate_vector((0, 0, 0.1), link8_quat), quat_mul(link8_quat, quat_delta))
+        # print(self.w.get_joint_info_by_id(self.panda, 11))
+        # print(self.w.get_joint_state_by_id(self.panda, 11))
+
+        return ik_solution
+
+    def move_qpos(self, target_qpos: np.ndarray, speed: float = 0.01, timeout: float = 10.0, local_smoothing: bool = True) -> bool:
         """Move UR5 to target joint configuration."""
+
+        if local_smoothing is False:
+            raise RuntimeError('Local smoothing must be set to True for UR5.')
+
         for _ in jacinle.timeout(timeout):
             currj = [self.client.p.getJointState(self.ur5, i)[0] for i in self.ur5_joints]
             currj = np.asarray(currj)
-            diffj = targj - currj
+            diffj = target_qpos - currj
 
             # pos, quat = self.client.w.get_link_state_by_id(self.ur5, self.ur5_ee_tip)
 
@@ -202,14 +258,14 @@ class UR5ReachAndPick(RobotActionPrimitive):
         if speed is None:
             speed = self.speed
 
-        # Execute picking primitive.
-        prepick_pos, prepick_quat = compose_transformation(pos, quat, (0, 0, self.height), (0, 0, 0, 1))
-        postpick_pos, postpick_quat = compose_transformation(pos, quat, (0, 0, self.height), (0, 0, 0, 1))
+        pos, quat = np.asarray(pos, dtype=np.float32), np.asarray(quat, dtype=np.float32)
+        prepick_pos, prepick_quat = pos + np.array([0, 0, self.height], dtype=np.float32), quat
+        postpick_pos, postpick_quat = pos + np.array([0, 0, self.height], dtype=np.float32), quat
 
-        with self.robot.client.with_fps(30):
-            succ = self.robot.move_pose(prepick_pos, prepick_quat, speed=self.speed)
+        succ = self.robot.move_pose(prepick_pos, prepick_quat, speed=self.speed)
         if not succ:
             return False
+        # self.client.step(120)
 
         pos_delta = np.array([0, 0, -0.001], dtype=np.float32)
         target_pos = prepick_pos
@@ -250,8 +306,9 @@ class UR5ReachAndPlace(RobotActionPrimitive):
 
         self.robot.activate_gripper()
 
-        preplace_pos, preplace_quat = compose_transformation(pos, quat, (0, 0, self.height), (0, 0, 0, 1))
-        postplace_pos, postplace_quat = compose_transformation(pos, quat, (0, 0, self.height), (0, 0, 0, 1))
+        pos, quat = np.asarray(pos, dtype=np.float32), np.asarray(quat, dtype=np.float32)
+        preplace_pos, preplace_quat = pos + np.array([0, 0, self.height], dtype=np.float32), quat
+        postplace_pos, postplace_quat = pos + np.array([0, 0, self.height], dtype=np.float32), quat
 
         target_pos = preplace_pos
         pos_delta = np.array([0, 0, -0.001], dtype=np.float32)

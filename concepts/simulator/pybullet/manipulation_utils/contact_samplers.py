@@ -188,7 +188,10 @@ class PushParameter(object):
     ee_quat: np.ndarray
 
 
-def sample_push_with_support(robot: Robot, object_id: int, support_object_id: int, max_attempts: int = 1000, batch_size: int = 100, verbose=False) -> Iterable[PushParameter]:
+def sample_push_with_support(robot: Robot, object_id: int, support_object_id: int, max_attempts: int = 1000, batch_size: int = 100, push_distance_fn=None, verbose=False) -> Iterable[PushParameter]:
+    if push_distance_fn is None:
+        push_distance_fn = lambda: 0.1
+
     mesh = robot.world.get_mesh(object_id, zero_center=False)
 
     nr_batches = int(max_attempts / batch_size)
@@ -223,7 +226,7 @@ def sample_push_with_support(robot: Robot, object_id: int, support_object_id: in
         for index in feasible_point_indices:
             if verbose:
                 jacinle.log_function.print('sample_push_with_support', 'point', pcd.points[index], 'normal', -pcd.normals[index])
-            yield PushParameter(np.asarray(pcd.points[index]), -np.asarray(pcd.normals[index]), 0.1, robot.get_ee_home_quat())
+            yield PushParameter(np.asarray(pcd.points[index]), -np.asarray(pcd.normals[index]), push_distance_fn(), robot.get_ee_home_quat())
 
     if len(feasible_point_indices) == 0:
         raise ValueError(f'No feasible points for {object_id} on {support_object_id} after {nr_batches * batch_size} attempts.')

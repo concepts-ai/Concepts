@@ -1,0 +1,22 @@
+(define (domain pybullet-tabletop-base)
+
+(:types
+    item - object
+    robot - object
+    pose - vector[float32, 7]
+    qpos - vector[float32, 7]
+)
+
+(:predicates
+    (moveable ?i - item)
+    (robot-hands-free ?r - robot)             ;; robot is not holding anything
+    (robot-holding-item ?r - robot ?i - item) ;; robot is holding item
+    (support ?i - item ?s - item)             ;; i is supported by s
+
+    (robot-qpos ?r - robot -> qpos)           ;; robot's qpos
+    (item-pose ?i - item -> pose)             ;; item's pose
+
+    (robot-identifier ?r - robot -> int64)    ;; robot's identifier
+    (item-identifier ?i - item -> int64)      ;; robot's identifier
+)
+)

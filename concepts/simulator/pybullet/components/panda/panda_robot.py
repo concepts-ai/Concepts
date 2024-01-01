@@ -161,7 +161,7 @@ class PandaRobot(Robot):
         self.client.w.set_batched_qpos_by_id(self.panda, self.gripper_joints, [type(self).PANDA_GRIPPER_HOME] * 2)
         self.gripper_activated = None
 
-    def get_ee_pose(self, fk=False) -> Tuple[np.ndarray, np.ndarray]:
+    def get_ee_pose(self, fk: bool = True) -> Tuple[np.ndarray, np.ndarray]:
         state = self.client.w.get_link_state_by_id(self.panda, self.panda_ee_tip, fk=fk)
         return np.array(state.position), np.array(state.orientation)
 
@@ -534,7 +534,7 @@ class PandaRobot(Robot):
         return self._change_gripper_state_free(True, timeout=timeout, force=force)
 
     @contextlib.contextmanager
-    def set_next_pand_open(self, open_target: float):
+    def set_next_panda_open(self, open_target: float):
         # TODO(Jiayuan Mao @ 2023/04/21): find a better way to do this.
         type(self).PANDA_GRIPPER_OPEN = open_target
         yield
