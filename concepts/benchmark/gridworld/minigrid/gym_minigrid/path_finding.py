@@ -5,7 +5,7 @@
 # Email  : maojiayuan@gmail.com
 # Date   : 03/08/2022
 #
-# This file is part of HACL-PyTorch.
+# This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
 from typing import Tuple, NamedTuple

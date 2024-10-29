@@ -60,13 +60,15 @@ from typing import Optional, Union, Tuple, Sequence, Dict
 
 import torch
 
-from concepts.dsl.dsl_types import ObjectType, NamedTensorValueType, PyObjValueType, ListType, ObjectConstant, Variable, UnnamedPlaceholder, QINDEX
+from concepts.dsl.dsl_types import ObjectType, ValueType, TensorValueTypeBase, NamedTensorValueType, PyObjValueType, ListType, BatchedListType, ObjectConstant, Variable, UnnamedPlaceholder, QINDEX
+from concepts.dsl.dsl_types import BOOL, INT64, FLOAT32
 from concepts.dsl.dsl_domain import DSLDomainBase
 from concepts.dsl.function_domain import FunctionDomain
 from concepts.dsl.value import ListValue
+from concepts.dsl.constraint import Constraint, SimulationFluentConstraintFunction
 from concepts.dsl.tensor_value import TensorValue, scalar
 from concepts.dsl.tensor_state import StateObjectReference, TensorState, NamedObjectTensorState
-from concepts.dsl.expression import Expression, VariableExpression, ObjectConstantExpression, ConstantExpression, FunctionApplicationExpression
+from concepts.dsl.expression import Expression, VariableExpression, ObjectConstantExpression, ConstantExpression, FunctionApplicationExpression, ValueCompareExpression, BoolOpType, QuantificationOpType
 from concepts.dsl.constraint import OptimisticValue, ConstraintSatisfactionProblem, OPTIM_MAGIC_NUMBER
 from concepts.dsl.parsers.parser_base import ParserBase
 from concepts.dsl.parsers.function_expression_parser import FunctionExpressionParser
@@ -99,15 +101,15 @@ BoundedVariablesDictCompatible = Union[
 def _get_state_object_reference(state, dtype, value):
     if isinstance(value, int):
         assert isinstance(state, NamedObjectTensorState)
-        value = StateObjectReference(state.object_type2name[var.dtype.typename][value], value)
+        value = StateObjectReference(state.object_type2name[dtype.typename][value], value, dtype)
         return value
     elif isinstance(value, str):
         assert isinstance(state, NamedObjectTensorState)
-        value = StateObjectReference(value, state.get_typed_index(value))
+        value = StateObjectReference(value, state.get_typed_index(value), dtype)
         return value
     elif isinstance(value, ObjectConstant):
         assert isinstance(state, NamedObjectTensorState)
-        value = StateObjectReference(value.name, state.get_typed_index(value.name, typename=value.dtype.typename))
+        value = StateObjectReference(value.name, state.get_typed_index(value.name, typename=value.dtype.typename), value.dtype)
         return value
     elif isinstance(value, slice):
         return value
@@ -147,11 +149,11 @@ def compose_bvdict(input_dict: BoundedVariablesDictCompatible, state: Optional[T
 
     if isinstance(input_dict, dict):
         if len(input_dict) == 0:
-            return input_dict
+            return {}
 
         sample_value = next(iter(input_dict.values()))
         if isinstance(sample_value, dict):
-            return input_dict
+            return {k: v.copy() for k, v in input_dict.items()}
 
         output_dict = dict()
         for var, value in input_dict.items():
@@ -159,6 +161,9 @@ def compose_bvdict(input_dict: BoundedVariablesDictCompatible, state: Optional[T
                 # Part 1: the variable corresponds to an object.
                 if isinstance(var.dtype, ObjectType):
                     output_dict.setdefault(var.typename, dict()).setdefault(var.name, _get_state_object_reference(state, var.dtype, value))
+                elif isinstance(var.dtype, ListType):
+                    assert isinstance(value, ListValue)
+                    output_dict.setdefault(var.dtype.typename, {})[var.name] = value
                 # Part 2: the variable corresponds to a Python object.
                 elif isinstance(var.dtype, PyObjValueType):
                     if isinstance(value, TensorValue):
@@ -168,7 +173,7 @@ def compose_bvdict(input_dict: BoundedVariablesDictCompatible, state: Optional[T
                     typename = var.dtype.typename
                     output_dict.setdefault(typename, {})[var.name] = value
                 # Part 3: the variable corresponds to a PyTorch tensor.
-                elif isinstance(var.dtype, NamedTensorValueType):
+                elif isinstance(var.dtype, TensorValueTypeBase):
                     if isinstance(value, TensorValue):
                         pass
                     elif isinstance(value, (bool, int, float, torch.Tensor)):
@@ -181,9 +186,15 @@ def compose_bvdict(input_dict: BoundedVariablesDictCompatible, state: Optional[T
                 elif isinstance(var.dtype, ListType):
                     assert isinstance(value, ListValue)
                     if isinstance(var.dtype.element_type, ObjectType):
-                        value = ListValue(var.dtype, [_get_state_object_reference(state, var.dtype.element_type, v) for v in value.values])
+                        if value.values == QINDEX:
+                            pass
+                        else:
+                            value = ListValue(var.dtype, [_get_state_object_reference(state, var.dtype.element_type, v) for v in value.values])
                     else:
                         pass
+                    output_dict.setdefault(var.dtype.typename, {})[var.name] = value
+                elif isinstance(var.dtype, BatchedListType):
+                    assert isinstance(value, TensorValue)
                     output_dict.setdefault(var.dtype.typename, {})[var.name] = value
                 else:
                     raise TypeError(f'Invalid variable type: {var.dtype}.')
@@ -194,6 +205,20 @@ def compose_bvdict(input_dict: BoundedVariablesDictCompatible, state: Optional[T
                 typename, value_index = state.get_typename(value), state.get_typed_index(value)
                 value = StateObjectReference(value, value_index)
                 output_dict.setdefault(typename, dict()).setdefault(var, value)
+            elif isinstance(var, str) and isinstance(value, ObjectConstant):
+                assert state is not None
+                typename = value.typename
+                value_index = state.get_typed_index(value.name, typename)
+                value = StateObjectReference(value.name, value_index, value.dtype)
+                output_dict.setdefault(typename, dict()).setdefault(var, value)
+            elif isinstance(var, str) and isinstance(value, StateObjectReference):
+                assert state is not None
+                assert value.dtype is not None
+                output_dict.setdefault(value.dtype.typename, dict()).setdefault(var, value)
+            elif isinstance(var, str) and isinstance(value, ListValue):
+                output_dict.setdefault(value.dtype.typename, dict()).setdefault(var, value)
+            elif isinstance(var, str) and isinstance(value, TensorValue):
+                output_dict.setdefault(value.dtype.typename, dict()).setdefault(var, value)
             else:
                 raise TypeError(f'Invalid KV pair: {var} -> {value}.')
         return output_dict
@@ -256,8 +281,6 @@ class TensorValueExecutorBase(DSLExecutorBase):
 
         self._state = None
         self._bounded_variables = dict()
-        self._value_quantizer = ValueQuantizer(self)
-        self._pyobj_store = PyObjectStore(self)
 
     @property
     def parser(self) -> Optional[ParserBase]:
@@ -293,14 +316,17 @@ class TensorValueExecutorBase(DSLExecutorBase):
         self._state = old_state
 
     @contextlib.contextmanager
-    def with_bounded_variables(self, bvdict: BoundedVariablesDictCompatible):
+    def with_bounded_variables(self, bvdict: BoundedVariablesDictCompatible, bypass_bounded_variable_check: bool = False):
         """A context manager to set the bounded variables for the executor.
 
         Args:
             bvdict: the bounded variables.
+            bypass_bounded_variable_check: whether to bypass the check for the bounded variables. If True, the input bounded variables will be used directly without any modification. Otherwise, the input bounded variables will be composed with the current state of the executor.
         """
         old_bvdict = self._bounded_variables
-        self._bounded_variables = compose_bvdict(bvdict, state=self._state)
+        if not bypass_bounded_variable_check:
+            bvdict = compose_bvdict(bvdict, state=self._state)
+        self._bounded_variables = bvdict
         yield
         self._bounded_variables = old_bvdict
 
@@ -323,6 +349,20 @@ class TensorValueExecutorBase(DSLExecutorBase):
             for name in variables:
                 del self._bounded_variables[typename][name]
 
+    def retrieve_bounded_variable_by_name(self, name: str) -> Union[TensorValue, slice, StateObjectReference]:
+        """Retrieve a bounded variable by its name.
+
+        Args:
+            name: the name of the variable.
+
+        Returns:
+            the value of the variable.
+        """
+        for variables in self._bounded_variables.values():
+            if name in variables:
+                return variables[name]
+        raise KeyError(f'Variable {name} not found in the bounded variables.')
+
     def get_bounded_variable(self, variable: Variable) -> Union[TensorValue, slice, StateObjectReference]:
         """Get the value of a bounded variable.
 
@@ -333,30 +373,6 @@ class TensorValueExecutorBase(DSLExecutorBase):
             the value of the variable.
         """
         return get_bvdict(self._bounded_variables, variable)
-
-    def set_value_quantizer(self, value_quantizer: ValueQuantizer):
-        """Set the value quantizer for the executor.
-
-        Args:
-            value_quantizer: the value quantizer.
-        """
-        self._value_quantizer = value_quantizer
-
-    def reset_value_quantizer(self):
-        """Reset the value quantizer to the default value quantizer."""
-        self._value_quantizer = ValueQuantizer(self)
-
-    def set_pyobj_store(self, pyobj_store: PyObjectStore):
-        """Set the Python object store for the executor.
-
-        Args:
-            pyobj_store: the Python object store.
-        """
-        self._pyobj_store = pyobj_store
-
-    def reset_pyobj_store(self):
-        """Reset the Python object store."""
-        self._pyobj_store = PyObjectStore(self)
 
     def set_parser(self, parser: ParserBase):
         """Set the parser for the executor.
@@ -407,11 +423,55 @@ class TensorValueExecutorBase(DSLExecutorBase):
     def _execute(self, expression: Expression) -> TensorValueExecutorReturnType:
         raise NotImplementedError()
 
-    @contextlib.contextmanager
-    def checkpoint_storage(self):
-        """Checkpoint the storages of the executor, including the value quantizer and the Python object store."""
-        with self.value_quantizer.checkpoint(), self.pyobj_store.checkpoint():
-            yield
+    def check_constraint(self, constraint: Constraint, state: Optional[TensorState] = None):
+        if constraint.function is BoolOpType.NOT:
+            return constraint.arguments[0].item() == (not constraint.rv.item())
+        elif constraint.function in (QuantificationOpType.FORALL, BoolOpType.AND):
+            return all([x.item() for x in constraint.arguments]) == constraint.rv.item()
+        elif constraint.function in (QuantificationOpType.EXISTS, BoolOpType.OR):
+            return any([x.item() for x in constraint.arguments]) == constraint.rv.item()
+        elif constraint.function is BoolOpType.IMPLIES:
+            return (not constraint.arguments[0].item()) or constraint.arguments[1].item() == constraint.rv.item()
+        elif constraint.function is BoolOpType.XOR:
+            return sum([x.item() for x in constraint.arguments]) % 2 == constraint.rv.item()
+
+        if constraint.is_equal_constraint:
+            if constraint.arguments[0].dtype in (BOOL, INT64, FLOAT32):
+                return (constraint.arguments[0].item() == constraint.arguments[1].item()) == constraint.rv.item()
+            else:
+                return self.check_eq_constraint(constraint.arguments[0].dtype, constraint.arguments[0], constraint.arguments[1], constraint.rv.item(), state)
+
+
+        if isinstance(constraint.function, SimulationFluentConstraintFunction):
+            return False
+
+        # assert isinstance(c.function, CrowFunctionBase)
+        # # NB(Jiayuan Mao @ 09/05): for generator placeholders, they can only be set true through the corresponding generators.
+        # if isinstance(c.function, CrowFunction) and c.function.is_generator_placeholder:
+        #     return False
+
+        argument_values = list()
+        for argument, argv in zip(constraint.function.arguments, constraint.arguments):
+            if isinstance(argument.dtype, ObjectType):
+                assert isinstance(argv, StateObjectReference)
+                argument_values.append(ObjectConstantExpression(ObjectConstant(argv, argument.dtype)))
+            elif isinstance(argument.dtype, ValueType):
+                argument_values.append(ConstantExpression(argv, argument.dtype))
+            else:
+                raise TypeError(f'Unsupported argument type: {argument.dtype}.')
+
+        func = FunctionApplicationExpression(constraint.function, argument_values)
+        with self.with_state(state):
+            rv = self._execute(func)
+        if rv.dtype == BOOL:
+            return (rv.item() > 0.5) == constraint.rv.item()
+        else:
+            return self.check_eq_constraint(rv.dtype, rv, constraint.rv.item(), True, state)
+
+    def check_eq_constraint(self, dtype: TensorValueTypeBase, x: TensorValue, y: TensorValue, target: bool, state: Optional[TensorState] = None) -> bool:
+        expr = ValueCompareExpression(ValueCompareExpression.OpType.EQ, ConstantExpression(x, dtype), ConstantExpression(y, dtype))
+        with self.with_state(state):
+            return self._execute(expr).item() == target
 
 
 class FunctionDomainTensorValueExecutor(TensorValueExecutorBase):
@@ -447,11 +507,14 @@ class FunctionDomainTensorValueExecutor(TensorValueExecutorBase):
             variable = expr.variable
             return self._bounded_variables[variable.dtype.typename][variable.name]
         elif isinstance(expr, ObjectConstantExpression):
+            if isinstance(expr.constant.name, StateObjectReference):
+                return expr.constant.name
             assert isinstance(self._state, NamedObjectTensorState)
             constant = expr.constant
             return StateObjectReference(
                 constant.name,
-                self._state.get_typed_index(constant.name, constant.dtype.typename)
+                self._state.get_typed_index(constant.name, constant.dtype.typename),
+                constant.dtype
             )
         elif isinstance(expr, ConstantExpression):
             assert isinstance(expr.constant, TensorValue)

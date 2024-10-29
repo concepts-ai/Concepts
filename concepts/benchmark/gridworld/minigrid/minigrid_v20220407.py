@@ -5,7 +5,7 @@
 # Email  : maojiayuan@gmail.com
 # Date   : 04/07/2022
 #
-# This file is part of HACL-PyTorch.
+# This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
 import os.path as osp
@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 from dataclasses import dataclass
 
 import numpy as np
+import gym.spaces as spaces
 import torch
 import jactorch
 # import hacl.pdsketch as pds
@@ -25,8 +26,8 @@ import concepts.benchmark.gridworld.minigrid.gym_minigrid as minigrid
 from concepts.benchmark.gridworld.minigrid.gym_minigrid.minigrid import MiniGridEnv
 from concepts.benchmark.gridworld.minigrid.gym_minigrid.path_finding import find_path_to_obj
 
-from concepts.pdsketch.domain import State, Domain
-from concepts.pdsketch.executor import PDSketchExecutor
+from concepts.dm.pdsketch.domain import State, Domain
+from concepts.dm.pdsketch.executor import PDSketchExecutor
 
 __all__ = [
     'MiniGridEnvV20220407', 'make_minigrid_env', 'get_minigrid_domain_filename',
@@ -68,6 +69,9 @@ class MiniGridEnvV20220407(MiniGridEnv):
 
         super().__init__(grid_size=7, max_steps=64, seed=1337, require_obs=False)
 
+    action_space: spaces.Discrete
+    observation_space: spaces.Box
+
     task: str
     """A short string describing the task."""
 
@@ -75,7 +79,7 @@ class MiniGridEnvV20220407(MiniGridEnv):
     """A short string describing the encoding method."""
 
     encoding_executor: Optional[PDSketchExecutor]
-    """The :class:`~concepts.pdsketch.executor.PDSketchExecutor` used for encoding the states."""
+    """The :class:`~concepts.dm.pdsketch.executor.PDSketchExecutor` used for encoding the states."""
 
     goal_obj: Optional[minigrid.WorldObj]
     """The goal object."""
@@ -228,7 +232,7 @@ class MiniGridEnvV20220407(MiniGridEnv):
 
 
 def _get_pds_state_full(env: MiniGridEnvV20220407, executor: PDSketchExecutor, ignore_walls: bool = False, include_extra_predicates: bool = True):
-    """Encode the environment state into a :class:`~concepts.pdsketch.domain.State` object.
+    """Encode the environment state into a :class:`~concepts.dm.pdsketch.domain.State` object.
 
     Args:
         env: the environment.
@@ -279,7 +283,7 @@ def _get_pds_state_full(env: MiniGridEnvV20220407, executor: PDSketchExecutor, i
 
 
 def _get_pds_state_basic(env: MiniGridEnvV20220407, executor: PDSketchExecutor, ignore_walls: bool = False):
-    """Encode the environment state into a :class:`~concepts.pdsketch.domain.State` object.
+    """Encode the environment state into a :class:`~concepts.dm.pdsketch.domain.State` object.
 
     Args:
         env: the environment.

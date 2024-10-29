@@ -1,0 +1,116 @@
+domain "blocksworld"
+
+typedef block: object
+
+# Features without return type annotations are assumed to be returning boolean values.
+
+feature [[state]] clear(x: block)
+feature [[state]] on(x: block, y: block)
+feature [[state]] on_table(x: block)
+feature [[state]] holding(x:block)
+feature [[state]] handempty()
+
+controller pickup_table(x: block)
+controller place_table(x: block)
+controller stack(x: block, y: block)
+controller unstack(x: block, y: block)
+
+behavior r_holding_from_table(x: block):
+  goal: holding(x)
+  body:
+    assert_hold on_table(x)
+    promotable sequential:
+      achieve clear(x)
+    achieve handempty()
+    pickup_table(x)
+  eff:
+    clear[x] = False
+    handempty = False
+    on_table[x] = False
+    holding[x] = True
+
+behavior r_holding_from_stack(x: block):
+  goal: holding(x)
+  body:
+    bind y: block where:
+      on(x, y)
+    assert_hold on(x, y)
+    promotable sequential:
+      achieve clear(x)
+    achieve handempty()
+    unstack(x, y)
+  eff:
+    clear[x] = False
+    handempty = False
+    on[x, y] = False
+    holding[x] = True
+    clear[y] = True
+
+behavior r_clear(x: block):
+  goal: clear(x)
+  body:
+    bind y: block where:
+      on(y, x)
+    assert_hold on(y, x)
+    promotable sequential:
+      achieve clear(y)
+    achieve handempty()
+    unstack(y, x)
+  eff:
+    clear[y] = False
+    handempty = False
+    on[y, x] = False
+    holding[y] = True
+    clear[x] = True
+
+behavior r_clear_from_holding(x: block):
+  goal: clear(x)
+  body:
+    assert holding(x)
+    place_table(x)
+  eff:
+    holding[x] = False
+    clear[x] = True
+    handempty = True
+    on_table[x] = True
+
+behavior r_handempty():
+  goal: handempty()
+  body:
+    bind x: block where:
+      holding(x)
+    place_table(x)
+  eff:
+    holding[x] = False
+    handempty = True
+    clear[x] = True
+    on_table[x] = True
+
+behavior r_on(x: block, y: block):
+  goal: on(x, y)
+  body:
+    promotable unordered:
+      achieve clear(y)
+      achieve clear(x)
+    achieve_once handempty()
+    untrack clear(x)
+    achieve holding(x)
+    stack(x, y)
+  eff:
+    clear[y] = False
+    holding[x] = False
+    on[x, y] = True
+    clear[x] = True
+    handempty = True
+
+behavior r_on_table(x: block):
+  goal: on_table(x)
+  body:
+    promotable:
+      achieve holding(x)
+    place_table(x)
+  eff:
+    holding[x] = False
+    on_table[x] = True
+    clear[x] = True
+    handempty = True

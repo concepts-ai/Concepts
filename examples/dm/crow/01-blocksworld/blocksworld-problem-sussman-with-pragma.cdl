@@ -1,0 +1,23 @@
+problem "blocksworld-sussman"
+domain "blocksworld-breakdown.cdl"
+
+#!pragma planner_is_goal_serializable=False
+#!pragma planner_is_goal_ordered=True
+#!pragma planner_always_commit_skeleton=True
+
+objects:
+  A: block
+  B: block
+  C: block
+
+init:
+  on_table[A] = True
+  on_table[B] = True
+  on[C, A] = True
+  foreach x: block:
+    clear[x] = True
+  clear[A] = False
+  handempty[...] = True
+
+goal:
+  on(B, C) and on(A, B)

@@ -1,0 +1,34 @@
+problem "blocksworld-sussman"
+domain "blocksworld-breakdown.cdl"
+
+#!pragma planner_always_commit_skeleton=True
+# Note that we have to increase the minimum search depth to a large enough number.
+# If not, the planner will not be able to find a solution for solution under depth 6.
+# As a result, it will actually run SLOWER than having a larger minimum search depth.
+# Because it will keep trying all possible promotions of the subgoals under depth 5 or 6...
+#!pragma planner_min_search_depth=10
+
+objects:
+  A: block
+  B: block
+  C: block
+
+init:
+  on_table[A] = True
+  on_table[B] = True
+  on[C, A] = True
+  foreach x: block:
+    clear[x] = True
+  clear[A] = False
+  handempty[...] = True
+
+
+behavior make_stack(x: block, y: block, z: block):
+  body:
+    [[ordered=True, serializable=False]]
+    pachieve on(y, z) and on(x, y)
+
+
+behavior __goal__():
+  body:
+    make_stack(A, B, C)

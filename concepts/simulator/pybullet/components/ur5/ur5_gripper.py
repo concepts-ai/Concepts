@@ -18,9 +18,9 @@ import numpy as np
 import pybullet as p
 
 from jacinle.utils.enum import JacEnum
+from concepts.math.frame_utils_xyzw import get_transform_a_to_b, solve_tool_from_ee
 from concepts.simulator.pybullet.client import BulletClient
-from concepts.simulator.pybullet.components.robot_base import Gripper, GripperObjectIndices
-from concepts.simulator.pybullet.rotation_utils import get_ee_to_tool, solve_tool_from_ee
+from concepts.simulator.pybullet.components.robot_base import BulletGripperBase, GripperObjectIndices
 
 SPATULA_BASE_URDF = 'robots/ur5/spatula/spatula-base.urdf'
 SUCTION_BASE_URDF = 'robots/ur5/suction/suction-base.urdf'
@@ -43,7 +43,7 @@ class UR5GripperType(JacEnum):
             raise ValueError(f'Unknown gripper type: {self}.')
 
 
-class Spatula(Gripper):
+class Spatula(BulletGripperBase):
     """Simulate simple spatula for pushing."""
 
     def __init__(self, client: BulletClient, robot: int, ee: int, obj_ids: GripperObjectIndices):  # pylint: disable=unused-argument
@@ -65,7 +65,7 @@ class Spatula(Gripper):
         )
 
 
-class Suction(Gripper):
+class Suction(BulletGripperBase):
     """Simulate simple suction dynamics."""
 
     def __init__(self, client, robot, ee, obj_ids):
@@ -182,7 +182,10 @@ class Suction(Gripper):
                             childFramePosition=(0, 0, 0),
                             childFrameOrientation=(0, 0, 0)
                         )
-                        self.contact_ee_to_object = get_ee_to_tool(self.client, self.head_id, 0, obj_id)
+
+                        link_state = self.world.get_link_state_by_id(self.head_id, 0, fk=True).get_transformation()
+                        obj_state = self.world.get_body_state_by_id(obj_id).get_transformation()
+                        self.contact_ee_to_object = get_transform_a_to_b(link_state[0], link_state[1], obj_state[0], obj_state[1])
                         break
 
                 self.activated = True

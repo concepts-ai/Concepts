@@ -84,7 +84,7 @@ class ValueQuantizer(object):
             the quantized tensor.
         """
 
-        if dtype.base_type.typename in ScalarValueType.INTRINSICALLY_QUANTIZED_DTYPES:
+        if dtype.parent_type.typename in ScalarValueType.INTRINSICALLY_QUANTIZED_DTYPES:
             raise RuntimeError('This branch should not be reached. Please report this bug to the developers.')
             # if torch.dtype in (torch.float16, torch.float32, torch.float64):
             #     return torch.round(tensor).to(torch.int64)

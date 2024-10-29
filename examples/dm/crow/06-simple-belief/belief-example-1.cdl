@@ -1,0 +1,16 @@
+problem "belief-example-1"
+domain "belief.cdl"
+
+objects:
+  R1, R2: Room
+
+def get_current_room(loc: prob[Room]) -> Room
+def get_next_room(x: Room) -> Room
+
+init:
+  robot_at[R1] = 1.0
+
+behavior __goal__():
+  body:
+    let target_room = get_next_room(get_current_room(robot_at[:]))
+    achieve robot_at[target_room] >= 0.95

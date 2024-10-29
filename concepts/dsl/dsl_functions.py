@@ -32,7 +32,7 @@ from jacinle.utils.cache import cached_property
 from jacinle.utils.defaults import option_context
 from jacinle.utils.printing import indent_text
 
-from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, ListType, ConstantType, UnionType, Variable
+from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, SequenceType, TupleType, UniformSequenceType, ConstantType, UnionType, Variable
 from concepts.dsl.dsl_types import FormatContext, get_format_context
 
 if TYPE_CHECKING:
@@ -104,13 +104,13 @@ class AnonymousFunctionArgumentGenerator(object):
         return [self.gen() for _ in range(n)]
 
 
-FunctionArgumentType = Union[ObjectType, ValueType, 'FunctionType']
+FunctionArgumentType = Union[ObjectType, ValueType, 'FunctionType', SequenceType]
 """Acceptable types for function arguments. See the documentation of `FunctionType` for more details."""
 
 FunctionArgumentListType = Union[Sequence[FunctionArgumentType], Sequence[Variable], Dict[str, FunctionArgumentType]]
 """Acceptable types for function argument lists. See the documentation of `FunctionType` for more details."""
 
-FunctionReturnType = Union[ValueType, ListType, 'FunctionType', Sequence[Union[ValueType, ListType, 'FunctionType']]]
+FunctionReturnType = Union[ObjectType, ValueType, 'FunctionType', SequenceType]
 """Acceptable types for function return types. See the documentation of `FunctionType` for more details."""
 
 
@@ -132,11 +132,17 @@ class FunctionType(TypeBase):
     arguments_name2index: Dict[str, int]
     """The mapping from argument names to argument indices."""
 
-    return_type: Union[FunctionReturnType, Tuple[FunctionReturnType, ...]]
+    return_type: FunctionReturnType
     """The return type of the function type."""
 
     return_name: Optional[Union[str, Tuple[str, ...]]]
     """The name of the return value."""
+
+    is_generator_function: bool
+    """Whether the function is a generator function."""
+
+    is_simple_arguments: bool
+    """Whether all arguments are not batched-list types."""
 
     is_singular_return: bool
     """Whether there is only one return value."""
@@ -150,6 +156,7 @@ class FunctionType(TypeBase):
         return_type: FunctionReturnType,
         argument_names: Optional[Sequence[str]] = None,
         return_name: Optional[Union[str, Sequence[str]]] = None,
+        is_generator_function: bool = False,
         alias: Optional[str] = None
     ):
         """Initialize the function type.
@@ -170,6 +177,7 @@ class FunctionType(TypeBase):
             return_type: The return type of the function type.
             argument_names: The names of the arguments.
             return_name: The name of the return value.
+            is_generator_function: Whether the function is a generator function.
             alias: The alias name of the function type.
         """
 
@@ -184,54 +192,63 @@ class FunctionType(TypeBase):
                 self.argument_types = tuple()
             elif isinstance(arguments[0], Variable):
                 assert argument_names is None, 'Cannot specify both `arguments` and `argument_names`.'
-                self.argument_types = tuple(arg.dtype for arg in arguments)
+                self.argument_types = tuple(arg.dtype.unwrap_alias() for arg in arguments)
                 self.argument_names = tuple(arg.name for arg in arguments)
                 self.arguments = arguments
             else:
                 if argument_names is None:
-                    argument_names = tuple('#' + str(i) for i in range(len(arguments)))
+                    argument_names = tuple('_' + str(i) for i in range(len(arguments)))
                 else:
                     assert len(arguments) == len(argument_names), 'The length of `arguments` and `argument_names` must be the same.'
-                self.argument_types = tuple(arguments)
+                self.argument_types = tuple([arg.unwrap_alias() for arg in arguments])
                 self.argument_names = tuple(argument_names)
         elif isinstance(arguments, dict):
             assert argument_names is None, 'Cannot specify both `arguments` and `argument_names`.'
             self.argument_names = tuple(arguments.keys())
-            self.argument_types = tuple(arguments.values())
+            self.argument_types = tuple([arg.unwrap_alias() for arg in arguments.values()])
             self.arguments_dict = arguments.copy()
         else:
             raise TypeError(f'Invalid argument types: {arguments}. Must be a list or a dict.')
 
         if self.arguments is None:
-            self.arguments = tuple(Variable(name, dtype) for name, dtype in zip(self.argument_names, self.argument_types))
+            self.arguments = tuple(Variable(name, dtype.unwrap_alias()) for name, dtype in zip(self.argument_names, self.argument_types))
         if self.arguments_dict is None:
             self.arguments_dict = {name: dtype for name, dtype in zip(self.argument_names, self.argument_types)}
 
-        if isinstance(return_type, TypeBase):
+        if isinstance(return_type, TupleType):
             self.return_type = return_type
-            self.return_name = return_name
-        else:
-            self.return_type = tuple(return_type)
             if return_name is None:
                 self.return_name = None
             else:
                 self.return_name = tuple(return_name)
-                assert len(self.return_type) == len(self.return_name), 'The length of `return_type` and `return_name` must be the same.'
+                assert len(return_type.element_types) == len(self.return_name), 'The length of `return_type` and `return_name` must be the same.'
 
-            if len(self.return_type) == 1:
-                self.return_type = self.return_type[0]
-                if self.return_name is not None:
-                    self.return_name = self.return_name[0]
+            # NB(Jiayuan Mao @ 2024/03/10): I commented out this behavior but I'm not sure if it's correct.
+            # if len(return_type.element_types) == 1:
+            #     self.return_type = self.return_type.element_types[0]
+            #     if self.return_name is not None:
+            #         self.return_name = self.return_name[0]
+        else:
+            if return_name is not None and not isinstance(return_name, str):
+                raise ValueError(f'Invalid return name: {return_name}. Must be a string when the function has a singular return type')
+            self.return_type = return_type
+            self.return_name = return_name
 
-        self.is_singular_return = not isinstance(self.return_type, tuple)
+        self.is_generator_function = is_generator_function
+        self.is_simple_arguments = all(not isinstance(arg, UniformSequenceType) for arg in self.argument_types)
+        self.is_singular_return = not isinstance(self.return_type, TupleType)
         self.is_cacheable = self._gen_is_cacheable()
 
         super().__init__(self._gen_typename(), alias=alias)
 
     def _gen_typename(self) -> str:
+        if self.is_generator_function:
+            return '(' + ', '.join([str(arg) for arg in self.arguments]) + ') -> Gen[' + str(self.return_type) + ']'
         return '(' + ', '.join([str(arg) for arg in self.arguments]) + ') -> ' + str(self.return_type)
 
     def _gen_is_cacheable(self):
+        if self.is_generator_function:
+            return False
         for arg_def in self.arguments:
             if isinstance(arg_def, ValueType):
                 return False
@@ -588,9 +605,13 @@ class Function(object):
         return self.ftype.nr_arguments
 
     @property
-    def return_type(self) -> Union[ValueType, Tuple[ValueType, ...]]:
+    def return_type(self) -> FunctionReturnType:
         assert not self.is_overloaded
         return self.ftype.return_type
+
+    @property
+    def is_generator_function(self) -> bool:
+        return self.ftype.is_generator_function
 
     """When the function is overloaded, the following functions are used for get the "overridden calls" for each function type."""
 

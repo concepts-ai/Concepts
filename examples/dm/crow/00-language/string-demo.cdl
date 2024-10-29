@@ -1,0 +1,27 @@
+#!/usr/bin/env cdl-plan
+
+problem "string-demo"
+domain "__empty__"
+
+typedef Object: object
+typedef Color: string
+
+feature [[state]] color_of(o: Object) -> Color
+
+controller printb(b: bool)
+
+objects:
+  A: Object
+  B: Object
+  C: Object
+
+init:
+  color_of[A] = "red"
+  color_of[B] = "green"
+  color_of[C] = "blue"
+
+behavior __goal__():
+  body:
+    printb(color_of[A] == "red")
+    printb(color_of[A] != "red")
+

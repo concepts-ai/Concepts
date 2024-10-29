@@ -1,0 +1,55 @@
+#!/usr/bin/env cdl-plan
+
+problem "alternative-demo"
+domain "__empty__"
+
+typedef Object: object
+
+feature p(x: Object) -> bool
+feature q(x: Object) -> bool
+feature r(x: Object) -> bool
+
+controller controller1(x: Object)
+controller controller2(x: Object)
+controller controller3(x: Object)
+
+behavior behavior_1(x: Object):
+  body:
+    assert q(x)
+    do controller1(x)
+  eff:
+    p[x] = True
+
+behavior behavior_2(x: Object):
+  body:
+    do controller2(x)
+  eff:
+    r[x] = True
+
+behavior behavior_3(x: Object):
+  body:
+    assert r(x)
+    do controller3(x)
+  eff:
+    p[x] = True
+
+behavior test_behavior(x: Object):
+  goal: p(x)
+  body:
+    alternative:
+      behavior_1(x)
+      sequential:
+        behavior_2(x)
+        behavior_3(x)
+
+objects:
+  A: Object
+
+init:
+  # If you uncomment the following line, we should be able to find a plan that uses controller1
+  # q[A] = True
+  pass
+
+behavior __goal__():
+  body:
+    achieve p(A)

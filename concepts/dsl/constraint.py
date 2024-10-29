@@ -26,6 +26,7 @@ Here, we only consider constraints of the following form: ``function(*arguments)
 import contextlib
 from enum import IntEnum
 from dataclasses import dataclass
+from os import times
 from typing import Any, Optional, Union, Sequence, Tuple, List, Set, Dict
 
 import torch
@@ -33,16 +34,17 @@ import jacinle
 from jacinle.utils.printing import indent_text
 from jacinle.utils.enum import JacEnum
 
-from concepts.dsl.dsl_types import BOOL, INT64, TensorValueTypeBase, PyObjValueType, Variable
+from concepts.dsl.dsl_types import BOOL, INT64, TensorValueTypeBase, PyObjValueType, ValueType, Variable
 from concepts.dsl.dsl_functions import Function
 from concepts.dsl.tensor_value import TensorValue
+from concepts.dsl.tensor_state import StateObjectReference
 from concepts.dsl.expression import BoolOpType, QuantificationOpType, ValueOutputExpression
 
 __all__ = [
     'OPTIM_MAGIC_NUMBER', 'OPTIM_MAGIC_NUMBER_UPPER', 'OPTIM_MAGIC_NUMBER_MAGIC',
     'is_optimistic_value', 'optimistic_value_id', 'is_optimistic_value',
     'OptimisticValue', 'cvt_opt_value', 'SimulationFluentConstraintFunction',
-    'Constraint', 'EqualityConstraint', 'ConstraintSatisfactionProblem', 'NamedConstraintSatisfactionProblem',
+    'Constraint', 'EqualityConstraint', 'GroupConstraint', 'OptimisticValueRecord', 'ConstraintSatisfactionProblem', 'NamedConstraintSatisfactionProblem',
     'AssignmentType', 'Assignment', 'AssignmentDict', 'print_assignment_dict', 'ground_assignment_value'
 ]
 
@@ -74,7 +76,7 @@ def maybe_optimistic_string(v: int):
 class OptimisticValue(object):
     """An optimistic value object holds a pair of data type and an optimistic identifier."""
 
-    def __init__(self, dtype: TensorValueTypeBase, identifier: int):
+    def __init__(self, dtype: ValueType, identifier: int):
         """Initialize the OptimisticValue object.
 
         Args:
@@ -82,14 +84,14 @@ class OptimisticValue(object):
             identifier: the optimistic identifier.
         """
 
-        if not isinstance(dtype, (TensorValueTypeBase, PyObjValueType)) and dtype != BOOL and dtype != INT64:
+        if not isinstance(dtype, ValueType) and dtype != BOOL and dtype != INT64:
             raise TypeError('OptimisticValue only supports NamedTensorValueType, PyObjValueType, BOOL, and INT64.')
 
         self.dtype = dtype
         self.identifier = identifier
         self.__post_init__()
 
-    dtype: TensorValueTypeBase
+    dtype: ValueType
     """The dtype of the optimistic value."""
 
     identifier: int
@@ -159,7 +161,7 @@ class OptimisticValueRecord(object):
         return not self.is_group and self.group_id != 0
 
 
-def cvt_opt_value(value: Union[OptimisticValue, TensorValue, bool, int], dtype: Optional[TensorValueTypeBase] = None) -> Union[TensorValue, OptimisticValue]:
+def cvt_opt_value(value: Union[OptimisticValue, TensorValue, StateObjectReference, bool, int], dtype: Optional[TensorValueTypeBase] = None) -> Union[TensorValue, StateObjectReference, OptimisticValue]:
     """Convert a value to OptimisticValue or a (determined) TensorValue. Acceptable types are:
 
     - OptimisticValue
@@ -182,6 +184,8 @@ def cvt_opt_value(value: Union[OptimisticValue, TensorValue, bool, int], dtype: 
         v = value.single_elem()
         if isinstance(v, OptimisticValue):
             return v
+        return value
+    elif isinstance(value, StateObjectReference):
         return value
     elif isinstance(value, bool):
         assert dtype is None or dtype == BOOL
@@ -215,8 +219,13 @@ class SimulationFluentConstraintFunction(object):
     arguments: Tuple[int, ...]
     """The arguments to the predicate."""
 
+    is_execution_constraint: bool
+    """The mode of the constraint. Can be one of the following: SIMULATION, EXECUTION. When it is simulation this flag is set to False."""
+
     @property
     def name(self) -> str:
+        if self.is_execution_constraint:
+            return f'ExecutionConstraint({self.action_index}, {self.predicate}, {self.arguments})'
         return f'SimulationConstraint({self.action_index}, {self.predicate}, {self.arguments})'
 
 
@@ -228,10 +237,11 @@ class Constraint(object):
 
     def __init__(
         self, function: Union[str, BoolOpType, QuantificationOpType, Function, SimulationFluentConstraintFunction],
-        arguments: Sequence[Union[TensorValue, OptimisticValue]],
+        arguments: Sequence[Union[TensorValue, StateObjectReference, OptimisticValue]],
         rv: Union[TensorValue, OptimisticValue],
         note: Any = None,
-        group: Optional['GroupConstraint'] = None
+        group: Optional['GroupConstraint'] = None,
+        timestamp: int = 0
     ):
         """Initialize a constraint. Each constraint takes the form of:
 
@@ -251,11 +261,12 @@ class Constraint(object):
         self.rv = cvt_opt_value(rv)
         self.note = note
         self.group = group
+        self.timestamp = timestamp
 
     function: Union[str, BoolOpType, QuantificationOpType, Function, SimulationFluentConstraintFunction]
     """The function identifier: either a string (currently only for equality constraints), or a BoolOpType or QuantificationOpType (for Boolean expressions), or a Function object."""
 
-    arguments: Tuple[Union[TensorValue, OptimisticValue], ...]
+    arguments: Tuple[Union[TensorValue, StateObjectReference, OptimisticValue], ...]
     """The arguments to the function."""
 
     rv: Union[TensorValue, OptimisticValue]
@@ -267,19 +278,23 @@ class Constraint(object):
     group: Optional['GroupConstraint']
     """The group of the constraint. None if the constraint is not in a group."""
 
+    timestamp: int
+    """The timestamp of the constraint."""
+
     def constraint_str(self):
         """Return the string representation of the constraint."""
         argument_strings = [x.format(short=True) if isinstance(x, TensorValue) else str(x) for x in self.arguments]
         if self.is_equal_constraint and isinstance(self.rv, TensorValue):
             if self.rv.item():
-                return '__EQ__(' + ', '.join(argument_strings) + ')'
+                return f'__EQ__@{self.timestamp}(' + ', '.join(argument_strings) + ')'
             else:
-                return '__NEQ__(' + ', '.join(argument_strings) + ')'
+                return f'__NEQ__@{self.timestamp}(' + ', '.join(argument_strings) + ')'
         else:
             if isinstance(self.function, (str, JacEnum)):
                 name = str(self.function)
             else:
                 name = self.function.name
+            name = f'{name}@{self.timestamp}'
             return name + '(' + ', '.join(argument_strings) + ') == ' + (self.rv.format(short=True) if isinstance(self.rv, TensorValue) else str(self.rv))
 
     def __str__(self):
@@ -386,15 +401,16 @@ class EqualityConstraint(Constraint):
     Therefore, when rv is True, it states that left and right are equal, and when rv is False, it states that left and right are not equal.
     """
 
-    def __init__(self, left: Union[TensorValue, OptimisticValue], right: Union[TensorValue, OptimisticValue], rv: Optional[Union[TensorValue, OptimisticValue]] = None):
+    def __init__(self, left: Union[TensorValue, OptimisticValue], right: Union[TensorValue, OptimisticValue], rv: Optional[Union[TensorValue, OptimisticValue]] = None, timestamp: int = 0):
         """Initialize an equality constraint.
 
         Args:
             left: the left hand side of the equality constraint.
             right: the right hand side of the equality constraint.
             rv: the expected return value of the equality constraint. If None, it will be set to True (i.e., left == right).
+            timestamp: the timestamp of the constraint.
         """
-        super().__init__(Constraint.EQUAL, [left, right], rv if rv is not None else TensorValue.TRUE)
+        super().__init__(Constraint.EQUAL, [left, right], rv if rv is not None else TensorValue.TRUE, timestamp=timestamp)
 
     function: str
     """The function identifier, which is always ``Constraint.EQUAL``."""
@@ -403,15 +419,17 @@ class EqualityConstraint(Constraint):
     rv: Union[TensorValue, OptimisticValue]
     note: Any
     group: Optional['GroupConstraint']
+    timestamp: int
 
     @classmethod
-    def from_bool(cls, left: Union[bool, int, OptimisticValue], right: Union[bool, int, OptimisticValue], rv: Optional[Union[bool, int, OptimisticValue]] = None) -> 'EqualityConstraint':
+    def from_bool(cls, left: Union[bool, int, OptimisticValue], right: Union[bool, int, OptimisticValue], rv: Optional[Union[bool, int, OptimisticValue]] = None, timestamp: int = 0) -> 'EqualityConstraint':
         """Create an equality constraint from bool or optimistic values (represented as integers).
 
         Args:
             left: the left hand side of the equality constraint.
             right: the right hand side of the equality constraint.
             rv: the expected return value of the equality constraint. If None, it will be set to True (i.e., left == right).
+            timestamp: the timestamp of the constraint.
 
         Returns:
             The created equality constraint.
@@ -428,7 +446,7 @@ class EqualityConstraint(Constraint):
                 assert isinstance(x, int) and is_optimistic_value(x)
                 # TODO(Jiayuan Mao @ 2023/11/17): remove this.
                 return OptimisticValue(BOOL, x)
-        return cls(_cvt(left), _cvt(right), _cvt(rv))
+        return cls(_cvt(left), _cvt(right), _cvt(rv), timestamp=timestamp)
 
 
 class ConstraintSatisfactionProblem(object):
@@ -444,6 +462,7 @@ class ConstraintSatisfactionProblem(object):
         index_order: Optional[List[Tuple[int, int]]] = None,
         constraints: Optional[List[Union[Constraint, GroupConstraint]]] = None,
         counter: int = 0,
+        state_timestamp: int = 0
     ):
         """Initialize a constraint satisfaction problem.
 
@@ -459,6 +478,7 @@ class ConstraintSatisfactionProblem(object):
         self.constraints = constraints if constraints is not None else list()
         self._optim_var_counter = counter
         self._current_group = None
+        self._state_timestamp = state_timestamp
 
     index2record: Dict[int, OptimisticValueRecord]
     """A mapping from variable indices to the variable objects."""
@@ -469,6 +489,18 @@ class ConstraintSatisfactionProblem(object):
     constraints: List[Union[Constraint, GroupConstraint]]
     """A list of constraints."""
 
+    _current_group: Optional['GroupConstraint']
+    """A temporary variable that can be used to annotate the current group. It will be triggered by the `with_group` context manager."""
+
+    _state_timestamp: int
+    """The timestamp of the current state. When we create a new constraint, we will use this timestamp."""
+
+    def empty(self):
+        return len(self.constraints) == 0
+
+    def increment_state_timestamp(self):
+        self._state_timestamp += 1
+
     def clone(self, constraints: Optional[List[Constraint]] = None) -> 'ConstraintSatisfactionProblem':
         """Clone the constraint satisfaction problem.
 
@@ -478,7 +510,7 @@ class ConstraintSatisfactionProblem(object):
 
         if constraints is None:
             constraints = self.constraints.copy()
-        return type(self)(self.index2record.copy(), self.index_order.copy(), constraints, self._optim_var_counter)
+        return type(self)(self.index2record.copy(), self.index_order.copy(), constraints, self._optim_var_counter, self._state_timestamp)
 
     def new_actionable_var(self, dtype: Union[TensorValueTypeBase, PyObjValueType], wrap: bool = False, **kwargs) -> Union[int, OptimisticValue]:
         """Create a new actionable variable.
@@ -552,9 +584,11 @@ class ConstraintSatisfactionProblem(object):
             c.note = note
         if self._current_group is not None:
             c.set_group(self._current_group)
+        c.timestamp = self._state_timestamp
         self.constraints.append(c)
+        return self
 
-    def add_equal_constraint(self, left: Union[TensorValue, OptimisticValue], right: Optional[Union[TensorValue, OptimisticValue]] = None, note: Optional[Any] = None):
+    def add_equal_constraint(self, left: Union[TensorValue, OptimisticValue], right: Optional[Union[TensorValue, OptimisticValue, bool]] = None, note: Optional[Any] = None):
         """Add an equality constraint.
 
         Args:
@@ -564,7 +598,10 @@ class ConstraintSatisfactionProblem(object):
         """
         if right is None:
             right = TensorValue.TRUE
+        if isinstance(right, bool):
+            right = TensorValue.TRUE if right else TensorValue.FALSE
         self.add_constraint(EqualityConstraint(left, right), note=note)
+        return self
 
     def __str__(self) -> str:
         fmt = 'ConstraintSatisfactionProblem{\n'
@@ -599,8 +636,9 @@ class NamedConstraintSatisfactionProblem(ConstraintSatisfactionProblem):
         index_order: Optional[List[Tuple[int, int]]] = None,
         constraints: Optional[List[Constraint]] = None,
         counter: int = 0,
+        state_timestamp: int = 0
     ):
-        super().__init__(index2record, index_order, constraints, counter)
+        super().__init__(index2record, index_order, constraints, counter, state_timestamp)
         self.name2optimistic_value = name2optimistic_value if name2optimistic_value is not None else dict()
 
     index2record: Dict[int, OptimisticValueRecord]
@@ -609,6 +647,12 @@ class NamedConstraintSatisfactionProblem(ConstraintSatisfactionProblem):
 
     name2optimistic_value: Dict[str, OptimisticValue]
     """A mapping from variable names to variable indices."""
+
+    def get_name(self, identifier: int, default: str) -> str:
+        if identifier in self.index2record:
+            if self.index2record[identifier].name is not None:
+                return self.index2record[identifier].name
+        return default
 
     def clone(self, constraints: Optional[List[Constraint]] = None) -> 'ConstraintSatisfactionProblem':
         """Clone the constraint satisfaction problem.
@@ -625,6 +669,7 @@ class NamedConstraintSatisfactionProblem(ConstraintSatisfactionProblem):
             index_order=self.index_order.copy(),
             constraints=constraints,
             counter=self._optim_var_counter,
+            state_timestamp=self._state_timestamp
         )
 
     def new_constant_var(self, name: str, dtype: Union[TensorValueTypeBase, PyObjValueType], domain: Optional[Set[Any]] = None, wrap: bool = False) -> Union[int, OptimisticValue]:
@@ -726,7 +771,7 @@ def print_assignment_dict(assignments: AssignmentDict, csp: Optional[ConstraintS
     def _name(x):
         default_name = f'@{optimistic_value_id(x)}'
         if csp is not None and isinstance(csp, NamedConstraintSatisfactionProblem):
-            return csp.index2name.get(x, default_name)
+            return csp.get_name(x, default_name)
         return default_name
 
     print('AssignmentDict{')

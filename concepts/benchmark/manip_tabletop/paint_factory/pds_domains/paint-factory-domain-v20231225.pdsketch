@@ -1,0 +1,85 @@
+(define
+(domain painting-factory-v20231225)
+
+(:types
+  item - object
+  robot - object
+  item-identifier - int64
+  robot-identifier - int64
+  qpos - vector[float32, 6]
+  pose - vector[float32, 2]  ;; (x, y)
+)
+
+(:predicates
+  ;; Part 1: observable predicates.
+  (robot-identifier ?r - robot -> robot-identifier)
+  (item-identifier ?o - item -> item-identifier)
+  (robot-qpos ?r - robot -> qpos)
+  (item-pose ?o - item -> pose)
+
+  ;; Part 2: object types.
+  (is-machine ?o - item)
+  (is-block ?o - item)
+  (is-target ?o - item)
+
+  ;; Part 3: image observation. Note that the vector size [3] is just a placeholder.
+  ;; The actual size of the vector is determined by the image size.
+  (item-image [observation=true, state=false] ?o - item -> vector[float32, 3])
+
+  ;; Part 4: functions. This function will be implemented by external samplers.
+  (is-in-pose ?id1 - item-identifier ?id2 - item-identifier ?p1 - pose ?p2 - pose)
+  (is-left-pose ?id1 - item-identifier ?id2 - item-identifier ?p1 - pose ?p2 - pose)
+  (is-right-pose ?id1 - item-identifier ?id2 - item-identifier ?p1 - pose ?p2 - pose)
+)
+
+;; The core feature predicate.
+(:derived (item-feature [state=true] ?o - item -> vector[float32, 64]) (??f (item-image ?o)))
+
+;; Color and type related predicates.
+(:derived (is-red    ?o - item) (??f (item-feature ?o)))
+(:derived (is-green  ?o - item) (??f (item-feature ?o)))
+(:derived (is-yellow ?o - item) (??f (item-feature ?o)))
+(:derived (is-purple ?o - item) (??f (item-feature ?o)))
+(:derived (is-pink   ?o - item) (??f (item-feature ?o)))
+(:derived (is-cyan   ?o - item) (??f (item-feature ?o)))
+(:derived (is-brown  ?o - item) (??f (item-feature ?o)))
+(:derived (is-orange ?o - item) (??f (item-feature ?o)))
+
+;; Spatial relationship related predicates.
+;; These relationships are internally classified using the functions (is-in-pose, is-left-pose, is-right-pose).
+(:derived (is-left   ?o1 - item ?o2 - item) (and
+  (is-left-pose (item-identifier ?o1) (item-identifier ?o2) (item-pose ?o1) (item-pose ?o2))
+  (is-block ?o1) (is-block ?o2)
+))
+(:derived (is-right  ?o1 - item ?o2 - item) (and
+  (is-right-pose (item-identifier ?o1) (item-identifier ?o2) (item-pose ?o1) (item-pose ?o2))
+  (is-block ?o1) (is-block ?o2)
+))
+(:derived (is-in     ?o1 - item ?o2 - item) (and
+  (is-in-pose (item-identifier ?o1) (item-identifier ?o2) (item-pose ?o1) (item-pose ?o2))
+  (is-block ?o1) (is-target ?o2)
+))
+
+(:action move-into-machine
+ :parameters (?r - robot ?o - item ?c - item)
+ :precondition (and (is-block ?o) (is-machine ?c))
+ :effect (and
+   (item-pose::assign ?o (item-pose ?c))
+   (item-feature::cond-assign ?o
+     (??g (item-feature ?c) (item-feature ?o))
+     (??h (item-feature ?c))
+   )
+ )
+)
+
+(:action move-to-target
+ :parameters (?r - robot ?o - item ?c - item ?p - pose)
+ :precondition (and
+   (is-block ?o) (is-target ?c)
+   (is-in-pose (item-identifier ?o) (item-identifier ?c) ?p (item-pose ?c))
+ )
+ :effect (and
+   (item-pose::assign ?o ?p)
+ )
+)
+)

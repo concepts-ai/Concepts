@@ -1,0 +1,71 @@
+#!/usr/bin/env cdl-plan
+
+problem "list-type-demo"
+domain "__empty__"  # __empty__ is a built-in domain that does not contain any types or features or controllers.
+
+typedef Object: object
+typedef Pose: vector[float32, 3]
+typedef ObjectList: Object[]
+typedef PoseList: Pose[]
+typedef PoseListIndexedByObject: Pose[Object]
+
+feature pose_of(obj: Object) -> Pose
+
+controller print(p: Pose)
+controller print_list_of_poses_indexed_by_object_1(lst: PoseListIndexedByObject)
+controller print_separate_bar()
+
+behavior print_list(lst: ObjectList):
+  body:
+    foreach obj in lst:
+      print(pose_of(obj))
+
+behavior print_list_of_poses(lst: PoseList):
+  body:
+    foreach p in lst:
+      print(p)
+
+behavior print_list_of_poses_indexed_by_object_2(lst: PoseListIndexedByObject):
+  body:
+    # We can also iterate over the PoseListIndexedByObject (a.k.a. Pose[Object]) directly.
+    # But this is not recommended because it can be slow.
+    foreach element in lst:
+      print(element)
+
+objects:
+  A, B, C: Object
+
+init:
+  pose_of[A] = [1.0, 2.0, 3.0]
+  pose_of[B] = [4.0, 5.0, 6.0]
+  pose_of[C] = [7.0, 8.0, 9.0]
+
+behavior test():
+  body:
+    foreach obj: Object:
+      let p = pose_of(obj)
+      print(p)
+    print_separate_bar()
+
+    print_list([A, B, C])
+    print_separate_bar()
+
+    let lst1: ObjectList = [A, B, C]
+    print_list(lst1)
+    print_separate_bar()
+
+    # lst2 is of type PoseList but not PoseListIndexedByObject because we are directly constructing it from several values.
+    let lst2: PoseList = [pose_of(A), pose_of(B), pose_of(C)]
+    print_list_of_poses(lst2)
+
+    let lst3: ObjectList = [A, B, C]
+    # Type Error:
+    # let lst4: PoseList = pose_of[lst3]
+    let lst4: PoseListIndexedByObject = pose_of[lst3]
+    print_list_of_poses_indexed_by_object_1(lst4)
+    print_list_of_poses_indexed_by_object_2(lst4)
+
+
+behavior __goal__():
+  body:
+    test()

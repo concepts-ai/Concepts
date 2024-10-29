@@ -1,0 +1,53 @@
+#!/usr/bin/env cdl-plan
+
+# This example demonstrates how we can declare preferences between behaviors.
+# In this example, we have two behaviors, achieve_q1 and achieve_q2, that both
+# achieve the same goal, q(x). The difference between the two behaviors is that
+# achieve_q1 has a higher cost than achieve_q2. We want to prefer achieve_q2
+# over achieve_q1 because it has a lower cost. This essentially means that we
+# prefer achieve_q2 over achieve_q1.
+
+problem "preference-demo"
+domain "__empty__"
+
+#!pragma planner_algo="priority_tree_v1"
+#!pragma planner_priority_fn="simple_additive_astar"
+
+typedef Object: object
+
+feature p(x: Object) -> bool
+feature q(x: Object) -> bool
+feature cost() -> float32
+
+controller make_q1(x: Object)
+controller make_q2(x: Object, y: Object)
+
+behavior achieve_q1(x: Object):
+  goal: q(x)
+  body:
+    do make_q1(x)
+  eff:
+    q[x] = True
+    cost += 2.
+
+behavior achieve_q2(x: Object):
+  goal: q(x)
+  body:
+    bind y: Object where:
+      p(y)
+    do make_q2(x, y)
+  eff:
+    q[x] = True
+    p[y] = False
+    cost += 1.
+
+objects:
+  A, B, C: Object
+
+init:
+  p[A] = True
+
+behavior __goal__():
+  minimize: cost()
+  body:
+    achieve q(C)

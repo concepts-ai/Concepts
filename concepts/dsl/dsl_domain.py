@@ -99,6 +99,17 @@ class DSLDomainBase(object):
         else:
             self.constants[value] = Value(dtype, value)
 
+    def has_function(self, name: str) -> bool:
+        """Check whether the domain has a function with the given name.
+
+        Args:
+            name: the name of the function.
+
+        Returns:
+            whether the domain has a function with the given name.
+        """
+        return name in self.functions
+
     def get_function(self, name: str) -> Function:
         """Get the function with the given name.
 

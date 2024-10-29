@@ -5,20 +5,22 @@
 # Email  : ezzluo@mit.edu, jiayuanm@mit.edu
 # Date   : 04/23/2021
 #
-# This file is part of HACL-PyTorch.
+# This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
 r"""
 Original file from Chevalier-Boisvert, Maxime and Willems, Lucas and Pal, Suman.
 
-@misc{gym_minigrid,
-  author = {Chevalier-Boisvert, Maxime and Willems, Lucas and Pal, Suman},
-  title = {Minimalistic Gridworld Environment for OpenAI Gym},
-  year = {2018},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/maximecb/gym-minigrid}},
-}
+.. code-block:: bibtex
+
+    @misc{gym_minigrid,
+      author = {Chevalier-Boisvert, Maxime and Willems, Lucas and Pal, Suman},
+      title = {Minimalistic Gridworld Environment for OpenAI Gym},
+      year = {2018},
+      publisher = {GitHub},
+      journal = {GitHub repository},
+      howpublished = {\url{https://github.com/maximecb/gym-minigrid}},
+    }
 """
 
 import sys

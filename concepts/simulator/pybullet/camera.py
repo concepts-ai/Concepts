@@ -14,11 +14,12 @@ import numpy as np
 import pybullet as p
 
 from typing import Optional, Union, Tuple
-from .rotation_utils import rpy
+from concepts.math.rotationlib_xyzw import rpy
 
 __all__ = [
     'CameraConfig', 'RealSenseD415', 'TopDownOracle', 'RS200Gazebo', 'KinectFranka', 'CLIPortCamera',
-    'get_point_cloud', 'get_point_cloud_image', 'get_orthographic_heightmap', 'lookat_rpy'
+    'get_point_cloud', 'get_point_cloud_image', 'get_orthographic_heightmap', 'lookat_rpy',
+    'kabsch_transform', 'SimpleCameraTransform'
 ]
 
 
@@ -264,6 +265,7 @@ def lookat_rpy(camera_pos: np.ndarray, target_pos: np.ndarray, roll: float = 0) 
     """Construct the roll, pitch, yaw angles of a camera looking at a target.
     This function assumes that the camera is pointing to the z-axis ([0, 0, 1]),
     in the camera frame.
+
     Args:
         camera_pos: the position of the camera.
         target_pos: the target position.
@@ -282,3 +284,73 @@ def lookat_rpy(camera_pos: np.ndarray, target_pos: np.ndarray, roll: float = 0) 
 
     return np.rad2deg(rv)
 
+
+def kabsch_transform(x, y, verbose: bool = False):
+    """Find optimal rotation and translation to map vectors in x to y
+
+    Args:
+        x: ndarray of size (N, 3).
+        y: ndarray of size (N, 3).
+        verbose: whether to print the intermediate results.
+
+    Returns:
+        rotation: ndarray of size (3, 3).
+        translation: ndarray of size (3,).
+    """
+
+    # Calculate centroids
+    centroid_x = np.mean(x, axis=0)
+    centroid_y = np.mean(y, axis=0)
+
+    # Centre the vectors
+    x_centred = x - centroid_x
+    y_centred = y - centroid_y
+
+    # Calculate covariance matrix
+    H = np.dot(x_centred.T, y_centred)
+
+    # Singular Value Decomposition
+    U, S, Vt = np.linalg.svd(H)
+
+    if verbose:
+        print('kabsch_transform::SVD')
+        print(U, S, Vt)
+
+    # Calculate rotation
+    d = (np.linalg.det(U) * np.linalg.det(Vt)) < 0.0
+    if d:
+        S[-1] = -S[-1]
+        U[:, -1] = -U[:, -1]
+
+    rotation = np.dot(Vt.T, U.T)
+
+    # Calculate translation
+    translation = centroid_y - np.dot(rotation, centroid_x)
+
+    if verbose:
+        print('kabsch_transform::Rotation:')
+        print(rotation)
+        print('kabsch_transform::Translation:')
+        print(translation)
+
+    matrix = np.eye(4)
+    matrix[:3, :3] = rotation
+    matrix[:3, 3] = translation
+    return matrix
+
+
+class SimpleCameraTransform(object):
+    def __init__(self, intrinsics, extrinsics):
+        self.intrinsics = intrinsics
+        self.extrinsics = extrinsics
+
+    def w2c(self, x, y, z):
+        x, y, z, _ = np.dot(self.extrinsics, np.array([x, y, z, 1]))
+        u, v, z = np.dot(self.intrinsics, np.array([x, y, z]))
+        u, v = int(u / z), int(v / z)
+        return u, v
+
+    def c2w(u, v, d):
+        x, y, z = np.dot(np.linalg.inv(self.intrinsics), np.array([u * d, v * d, d]))
+        x, y, z, _ = np.dot(np.linalg.inv(self.extrinsics), np.array([x, y, z, 1]))
+        return x, y, z

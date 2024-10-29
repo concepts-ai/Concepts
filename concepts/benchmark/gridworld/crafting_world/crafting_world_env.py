@@ -11,16 +11,18 @@
 import numpy as np
 import os.path as osp
 from PIL import Image
-from typing import Sequence
 
 from concepts.benchmark.gridworld.crafting_world.crafting_world_rules import MINING_RULES, CRAFTING_RULES, get_all_locations
-from concepts.benchmark.gridworld.crafting_world.crafting_world_gen.utils import underline_to_pascal
-from concepts.pdsketch.domain import Domain
-from concepts.pdsketch.operator import OperatorApplier
+from concepts.benchmark.gridworld.crafting_world.utils import underline_to_pascal
 
 SKIP_CRAFTING_LOCATION_CHECK = True
 
-__all__ = ['CraftingWorldSimulator', 'CraftingWorldRenderer', 'CraftingWorldPDDLExecutor']
+__all__ = ['CraftingWorldSimulator', 'CraftingWorldRenderer']
+
+
+def set_skip_crafting_location_check(value: bool = True):
+    global SKIP_CRAFTING_LOCATION_CHECK
+    SKIP_CRAFTING_LOCATION_CHECK = value
 
 
 class CraftingWorldSimulator(object):
@@ -32,7 +34,7 @@ class CraftingWorldSimulator(object):
         self.inventory = dict()  # int: Optional[Tuple[str, str]]  # (type, name)
         self.hypothetical = set()  # str
 
-    def reset_from_state(self, objects, state):
+    def reset_from_pds_state(self, objects, state):
         agent_at = list(state['agent-at'])[0][0]
         self.agent_pos = int(agent_at[1:])
 
@@ -62,6 +64,9 @@ class CraftingWorldSimulator(object):
         for obj_name, obj_type in state['object-of-type']:
             if obj_type == 'Hypothetical':
                 self.hypothetical.add(obj_name)
+
+    def reset_from_crow_state(self, objects, state):
+        raise NotImplementedError()
 
     def move_to(self, pos):
         self.agent_pos = max(1, min(self.nr_grids, pos))
@@ -284,7 +289,16 @@ class CraftingWorldRenderer(object):
         self._block_images['agent'] = np.array(Image.open(osp.join(osp.dirname(__file__), 'assets', 'Plains_Villager_Base.png')).resize((16, 16)))
         self._block_images['agent/Small'] = make_small_villager_image(self._block_images['agent'])
 
-    def render(self, simulator: CraftingWorldSimulator):
+    def render(self, simulator: CraftingWorldSimulator) -> np.ndarray:
+        """Render the current state of the simulator.
+
+        Args:
+            simulator: the simulator. The function will read out the current state of the simulator.
+
+        Returns:
+            the rendered image.
+        """
+
         map_canvas = self.basic_canvas.copy()
         inventory_canvas = self.inventory_canvas.copy()
 
@@ -344,116 +358,3 @@ class CraftingWorldRenderer(object):
         # Concatenate the two canvases
         canvas = np.concatenate((map_canvas, np.zeros((8, map_canvas.shape[1], 3), dtype='uint8') + 255, inventory_canvas), axis=0)
         return canvas
-
-
-class CraftingWorldPDDLExecutor(object):
-    def __init__(self, domain: Domain, simulator: CraftingWorldSimulator):
-        self.domain = domain
-        self.simulator = simulator
-
-    def execute(self, plan: Sequence[OperatorApplier]):
-        last_failed_operator = None
-        for i, action in enumerate(plan):
-            rv = self.step(action)
-            if not rv:
-                last_failed_operator = i
-                break
-
-    def step(self, action: OperatorApplier) -> bool:
-        action_name = action.operator.name
-        action_args = action.arguments
-        if action_name == "move-right":
-            self.simulator.move_right()
-        elif action_name == "move-left":
-            self.simulator.move_left()
-        elif action_name == "move-to":
-            self.simulator.move_to(int(action_args[1][1:]))
-        elif action_name == "pick-up":
-            try:
-                self.simulator.pick_up(int(_find_string_start_with(action_args, "i", first=True)[1:]), _find_string_start_with(action_args, "o", first=True))
-            except KeyError as e:
-                print(f'  pick-up {action_args} failed. Reason: {e}')
-                return False
-        elif action_name == "place-down":
-            self.simulator.place_down(int(_find_string_start_with(action_args, "i", first=True)[1:]))
-        elif action_name.startswith('mine'):
-            # Trying mining.
-            inventory_indices = [int(x[1:]) for x in _find_string_start_with(action_args, "i")]
-            object_indices = _find_string_start_with(action_args, "o")
-
-            hypothetical_object = [x for x in object_indices if x in self.simulator.hypothetical]
-            if len(hypothetical_object) != 1:
-                return False
-            hypothetical_object = hypothetical_object[0]
-
-            empty_inventory = [x for x in inventory_indices if self.simulator.inventory[x] is None]
-            if len(empty_inventory) != 1:
-                return False
-            empty_inventory = empty_inventory[0]
-
-            target_object = [
-                x for x in object_indices if x in self.simulator.objects and self.simulator.objects[x][1] == self.simulator.agent_pos
-            ]
-            if len(target_object) != 1:
-                return False
-            target_object = target_object[0]
-
-            tool_inventory = list(set(inventory_indices) - set([empty_inventory]))
-
-            rv = self.simulator.mine(target_object, empty_inventory, hypothetical_object, tool_inventory=tool_inventory[0] if len(tool_inventory) > 0 else None)
-            if not rv:
-                return False
-        elif action_name.startswith('craft'):
-            inventory_indices = [int(x[1:]) for x in _find_string_start_with(action_args, "i")]
-            object_indices = _find_string_start_with(action_args, "o")
-
-            hypothetical_object = [x for x in object_indices if x in self.simulator.hypothetical]
-            if len(hypothetical_object) != 1:
-                return False
-            hypothetical_object = hypothetical_object[0]
-
-            empty_inventory = [x for x in inventory_indices if self.simulator.inventory[x] is None]
-            if len(empty_inventory) != 1:
-                return False
-            empty_inventory = empty_inventory[0]
-
-            target_object = [ x for x in object_indices if x in self.simulator.objects and self.simulator.objects[x][1] == self.simulator.agent_pos ]
-            if len(target_object) != 1:
-                return False
-            target_object = target_object[0]
-
-            ingredients = list(set(inventory_indices) - {empty_inventory})
-
-            target_type = None
-            hypothetical_object_index = action_args.index(hypothetical_object)
-            hypothetical_object_varname = self.domain.operators[action_name].arguments[hypothetical_object_index].name
-            for effect in self.domain.operators[action_name].effects:
-                if (
-                    effect.assign_expr.predicate.function.name == 'object-of-type' and
-                    effect.assign_expr.predicate.arguments[0].name == hypothetical_object_varname and
-                    effect.assign_expr.predicate.arguments[1].__class__.__name__ == 'ObjectConstantExpression' and
-                    effect.assign_expr.value.__class__.__name__ == 'ConstantExpression' and
-                    effect.assign_expr.value.constant.item() == 1
-                ):
-                    # print('  Found target type', effect.assign_expr)
-                    target_type = effect.assign_expr.predicate.arguments[1].name
-                    break
-
-            rv = self.simulator.craft(target_object, empty_inventory, hypothetical_object, ingredients_inventory=ingredients, target_type=target_type)
-
-            if not rv:
-                return False
-        else:
-            return False
-
-        return True
-
-
-def _find_string_start_with(list_of_string, start, first=False):
-    rv = list()
-    for s in list_of_string:
-        if s.startswith(start):
-            if first:
-                return s
-            rv.append(s)
-    return rv

@@ -1,0 +1,182 @@
+# RWI: Robot-World-Item.
+# pp: pick-and-place
+
+# Predicates/Fluents
+
+typedef Hand: object
+typedef Object: object
+typedef Pose: vector[float32, 7]
+typedef Qpos: vector[float32, 7]
+typedef Traj: pyobject
+
+feature [[state]] holding(hand: Hand, x: Object) -> bool
+feature [[state]] holding_grasp(hand: Hand, x: Object) -> Pose
+feature [[state]] hand_available(hand: Hand) -> bool
+feature [[state]] qpos_of(hand: Hand) -> Qpos
+feature [[state]] pose_of(x: Object) -> Pose
+
+def holding_at_pose(hand: Hand, x: Object, grasp: Pose):
+  return holding_grasp(hand, x) == grasp
+
+def at_qpos(hand: Hand, qpos: Qpos):
+  return qpos_of(hand) == qpos
+
+def at_pose(x: Object, pose: Pose):
+  return pose_of(x) == pose
+
+def on_with_pose(x: Object, y: Object, x_pose: Pose, y_pose: Pose):
+  """Primitive function. If x is on y."""
+
+def on(x: Object, y: Object):
+  return on_with_pose(x, y, pose_of[x], pose_of[y])
+
+def stable_placing(x: Object, y: Object, y_pose: Pose, x_pose: Pose):
+  """Primitive function. If x can be placed on y with x_pose and y_pose."""
+
+def valid_grasp(hand: Hand, x: Object, grasp: Pose):
+  """Primitive function. If grasp is a valid grasping pose (relative pose) given the geometry of the hand and the object x."""
+
+def valid_grasp_q(hand: Hand, x: Object, grasp: Pose, x_pose: Pose, grasp_q: Qpos):
+  """Primitive function. If grasp_q is a valid grasping qpos given the geometry of the hand and the object x at x_pose."""
+
+def valid_hand_traj(hand: Hand, end_q: Qpos, hand_traj: Traj):
+  """Primitive function. If hand_traj is a valid trajectory for the hand to move from its **home position** to end_q."""
+
+def clear_from_path_pose(hand: Hand, hand_traj: Traj, x: Object, x_pose: Pose):
+  """Primitive function. If we execute hand trajectory (hand_traj) would it collide with an object at x_pose."""
+
+def clear_from_path(hand: Hand, hand_traj: Traj, x: Object):
+  return clear_from_path_pose(hand, hand_traj, x, pose_of[x])
+
+def clear_freemotion_path(hand: Hand, end_q: Qpos, hand_traj: Traj):
+  """the robot hand has a clear path from its current q to the end_q via hand_traj"""
+  return forall x is Object:
+    clear_from_path(hand, hand_traj, x)
+
+
+# Primitive controller. Execute the trajectory and close the gripper at the end.
+controller ctl_grasp(hand: Hand, traj: Traj)
+
+# Primitive controller. Execute the trajectory and open the gripper at the end.
+controller ctl_place(hand: Hand, traj: Traj)
+
+
+behavior r_pick(hand: Hand, x: Object, grasp: Pose, grasp_q: Qpos):
+  body:
+    # We only declare the variable but do not talk about how to sample it.
+    bind grasp_traj: Traj
+    achieve clear_freemotion_path(hand, grasp_q, grasp_traj)
+    assert valid_hand_traj(hand, grasp_q, grasp_traj)
+    achieve hand_available(hand)
+    ctl_grasp(hand, grasp_traj)
+
+
+behavior r_holding_2(hand: Hand, x: Object):
+  # The goal is to hold the object at an arbitrary pose.
+  goal: holding(hand, x)
+  body:
+    bind grasp: Pose where:
+      valid_grasp(hand, x, grasp)
+    achieve holding_at_pose(hand, x, grasp)
+
+
+behavior r_holding_2_current_pos(hand: Hand, x: Object, grasp: Pose):
+  # The goal is to hold the object at a particular pose
+  # Strategy 1: pick the object from the current pose.
+  goal: holding_at_pose(hand, x, grasp)
+  body:
+    bind grasp_q: Qpos where:
+      valid_grasp_q(hand, x, grasp, pose_of[x], grasp_q)
+    r_pick(hand, x, grasp, grasp_q)
+
+
+behavior r_holding_2_regrasping(hand: Hand, x: Object, grasp: Pose):
+  # The goal is to hold the object at a particular pose.
+  # Strategy 2: place an object on a chosen surface and regrasp it.
+  goal: holding_at_pose(hand, x, grasp)
+  body:
+    bind surface: Object, pick_pose: Pose, grasp_q: Qpos where:
+      stable_placing(x, surface, pose_of[surface], pick_pose)
+      valid_grasp_q(hand, x, grasp, pick_pose, grasp_q)
+    achieve at_pose(x, pick_pose)
+    r_pick(hand, x, grasp, grasp_q)
+
+
+behavior r_place(hand: Hand, x: Object, grasp: Pose, place_q: Qpos):
+  body:
+    bind place_traj: Traj
+    achieve clear_freemotion_path(hand, place_q, place_traj)
+    assert valid_hand_traj(hand, place_q, place_traj)
+    achieve holding_at_pose(hand, x, grasp)
+    ctl_place(hand, place_traj)
+
+
+behavior r_at_pose(x: Object, place: Pose):
+  goal: at_pose(x, place)
+  body:
+    bind hand: Hand
+    bind grasp: Pose, place_q: Qpos where:
+      valid_grasp(hand, x, grasp)
+      valid_grasp_q(hand, x, grasp, place, place_q)
+    r_place(hand, x, grasp, place_q)
+
+
+behavior r_on_current_pos(x: Object, y: Object):
+  # The goal is to place x on y.
+  # Strategy 1: place x on y at its current pose.
+  goal: on(x, y)
+  body:
+    bind place: Pose where:
+      stable_placing(x, y, pose_of[y], place)
+    achieve at_pose(x, place)
+
+
+behavior r_on_with_replacement(x: Object, y: Object):
+  # The goal is to place x on y.
+  # Strategy 2: place y at a chosen pose and then place x on y.
+  goal: on(x, y)
+  body:
+    bind x_pose: Pose, y_pose: Pose where:
+      stable_placing(x, y, x_pose, y_pose)
+    achieve at_pose(y, y_pose)
+    achieve at_pose(x, x_pose)
+
+
+behavior r_clear_freemotion_path_1(hand: Hand, end_q: Qpos, hand_traj: Traj):
+  goal: clear_freemotion_path(hand, end_q, hand_traj)
+  body:
+    # A trick to enforce to use this sampler to generate the target trajectory
+    bind hand_traj_2: Traj where:
+      valid_hand_traj(hand, end_q, hand_traj)
+    assert hand_traj_2 == hand_traj
+
+    local collision_objects = findall x is Object:
+      not clear_from_path(hand, hand_traj, x)
+    forall x in collision_objects:
+      achieve clear_from_path(hand, hand_traj, x)
+
+
+behavior r_clear_from_path(hand: Hand, hand_traj: Traj, x: Object):
+  goal: clear_from_path(hand, hand_traj, x)
+  body:
+    bind surface: Object, place_pose: Pose where:
+      stable_placing(x, surface, pose_of[surface], place_pose)
+      clear_from_path_pose(hand, hand_traj, x, place_pose)
+    achieve at_pose(x, place_pose)
+
+
+behavior r_hand_available(hand: Hand):
+  goal: hand_available(hand)
+  body:
+    bind x: Object where:
+      holding(hand, x)
+    bind surface: Object, place_pose: Pose where:
+      stable_placing(x, surface, pose_of[surface], place_pose)
+   # Explicitly by-passing the clear-path check.
+    bind place_q: Qpos where:
+      valid_grasp_q(hand, x, holding_grasp[hand, x], place_pose, place_q)
+    bind place_traj: Traj where:
+      assert valid_hand_traj(hand, place_q, place_traj)
+    ctl_place(hand, place_traj)
+
+

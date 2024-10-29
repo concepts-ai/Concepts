@@ -12,12 +12,14 @@
 
 All classes extend the basic :class:`Expression` class. They can be categorized into the following groups:
 
+- :class:`ObjectOrValueOutputExpression` is the base class for expressions that output objects or values. This is only used for type hinting.
 - :class:`ObjectOutputExpression` and :class:`ValueOutputExpression` are the expressions that output objects or values.
 - :class:`VariableExpression` which is the expression that refers to a variable.
 - :class:`VariableAssignmentExpression` which assigns a value to a variable.
 
 Under the :class:`ValueOutputExpression` category, there are a few sub-categories:
 
+- :class:`NullExpression` which is the expression that outputs a null value.
 - :class:`ConstantExpression` which is the expression that outputs a constant value.
 - :class:`ListCreationExpression` which is the expression that creates a list.
 - :class:`ListExpansionExpression` which is the expression that expands a list into a sequence of values (e.g., plan steps).
@@ -26,7 +28,12 @@ Under the :class:`ValueOutputExpression` category, there are a few sub-categorie
 - :class:`BoolExpression` which represents Boolean operations (and, or, not).
 - :class:`QuantificationExpression` which represents quantification (forall, exists).
 - :class:`GeneralizedQuantificationExpression` which represents generalized quantification (iota, all, counting quantifiers).
+- :class:`FindOneExpression` which represents the find-one quantification.
+- :class:`FindAllExpression` which represents the find-all quantification.
 - :class:`PredicateEqualExpression` which represents the equality test between a state variable and a value.
+- :class:`ObjectCompareExpression` which represents the comparison between two objects.
+- :class:`ValueCompareExpression` which represents the comparison between two values.
+- :class:`ConditionExpression` which represents the ternary conditional expression.
 - :class:`ConditionalSelectExpression` which represents the conditional selection for some computed value.
 - :class:`DeicticSelectExpression` which represents the deictic selection for some computed value (i.e., forall quantifiers).
 
@@ -56,11 +63,12 @@ from jacinle.utils.printing import indent_text
 from jacinle.utils.defaults import wrap_custom_as_default, gen_get_default
 
 from concepts.dsl.dsl_types import FormatContext, get_format_context
-from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, ListType, AutoType, TensorValueTypeBase, PyObjValueType, BOOL, FLOAT32, INT64, ObjectConstant, Variable
+from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, SequenceType, ListType, BatchedListType, AutoType, TensorValueTypeBase, PyObjValueType, BOOL, FLOAT32, INT64, STRING, ObjectConstant, Variable
 from concepts.dsl.dsl_functions import FunctionType, Function, FunctionArgumentUnset, AnonymousFunctionArgumentGenerator
 from concepts.dsl.dsl_domain import DSLDomainBase
 from concepts.dsl.value import ValueBase, Value, ListValue
 from concepts.dsl.tensor_value import TensorValue
+from concepts.dsl.tensor_state import StateObjectReference, StateObjectList
 
 try:
     from typing import TypeGuard
@@ -73,17 +81,18 @@ except ImportError:
 
 __all__ = [
     'DSLExpressionError', 'Expression', 'ExpressionDefinitionContext', 'get_expression_definition_context',
-    'ObjectOutputExpression', 'ValueOutputExpression', 'VariableExpression', 'VariableAssignmentExpression',
+    'ObjectOutputExpression', 'ValueOutputExpression', 'NullExpression', 'VariableExpression', 'VariableAssignmentExpression',
+    'ObjectOrValueOutputExpression', 'VariableOrObjectOutputExpression', 'VariableOrValueOutputExpression',
     'ObjectConstantExpression', 'ConstantExpression', 'ListCreationExpression',
     'FunctionApplicationError', 'FunctionApplicationExpression', 'ListFunctionApplicationExpression', 'ListExpansionExpression',
     'ConditionalSelectExpression', 'DeicticSelectExpression',
-    'BoolOpType', 'BoolExpression', 'AndExpression', 'OrExpression', 'NotExpression',
-    'QuantificationOpType', 'QuantificationExpression', 'GeneralizedQuantificationExpression', 'ForallExpression', 'ExistsExpression',
+    'BoolOpType', 'BoolExpression', 'AndExpression', 'OrExpression', 'NotExpression', 'XorExpression', 'ImpliesExpression',
+    'QuantificationOpType', 'QuantificationExpression', 'GeneralizedQuantificationExpression', 'ForallExpression', 'ExistsExpression', 'FindOneExpression', 'FindAllExpression',
+    'CompareOpType', 'ObjectCompareExpression', 'ValueCompareExpression', 'ConditionExpression',
     'PredicateEqualExpression', 'AssignExpression', 'ConditionalAssignExpression', 'DeicticAssignExpression',
     'cvt_expression', 'cvt_expression_list', 'get_type', 'get_types',
-    'is_object_output_expression', 'is_variable_assignment_expression', 'is_variable_assignment_expression',
-    'is_and_expr', 'is_or_expr', 'is_not_expr', 'is_forall_expr', 'is_exists_expr',
-    'iter_exprs', 'find_free_variables'
+    'is_null_expression', 'is_object_output_expression', 'is_value_output_expression', 'is_variable_assignment_expression',
+    'is_constant_bool_expr', 'is_and_expr', 'is_or_expr', 'is_not_expr', 'is_xor_expr', 'is_implies_expr', 'is_forall_expr', 'is_exists_expr',
 ]
 
 
@@ -102,7 +111,7 @@ class Expression(ABC):
 
     @property
     @abstractmethod
-    def return_type(self) -> Optional[Union[ObjectType, ValueType, FunctionType, Tuple[Union[ValueType, FunctionType], ...]]]:
+    def return_type(self) -> Optional[Union[ObjectType, ValueType, FunctionType, SequenceType]]:
         raise NotImplementedError()
 
     def check_arguments(self):
@@ -126,6 +135,54 @@ class Expression(ABC):
         else:
             with FormatContext(expr_max_length=max_length).as_default():
                 return str(self)
+
+    @property
+    def is_null_expression(self) -> bool:
+        return is_null_expression(self)
+
+    @property
+    def is_object_output_expression(self) -> bool:
+        return is_object_output_expression(self)
+
+    @property
+    def is_value_output_expression(self) -> bool:
+        return is_value_output_expression(self)
+
+    @property
+    def is_variable_assignment_expression(self) -> bool:
+        return is_variable_assignment_expression(self)
+
+    @property
+    def is_constant_bool_expr(self) -> bool:
+        return is_constant_bool_expr(self)
+
+    @property
+    def is_and_expr(self) -> bool:
+        return is_and_expr(self)
+
+    @property
+    def is_or_expr(self) -> bool:
+        return is_or_expr(self)
+
+    @property
+    def is_not_expr(self) -> bool:
+        return is_not_expr(self)
+
+    @property
+    def is_xor_expr(self) -> bool:
+        return is_xor_expr(self)
+
+    @property
+    def is_implies_expr(self) -> bool:
+        return is_implies_expr(self)
+
+    @property
+    def is_forall_expr(self) -> bool:
+        return is_forall_expr(self)
+
+    @property
+    def is_exists_expr(self) -> bool:
+        return is_exists_expr(self)
 
 
 class ExpressionDefinitionContext(object):
@@ -193,6 +250,18 @@ class ExpressionDefinitionContext(object):
     def as_default(self):
         yield self
 
+    def has_variable(self: 'ExpressionDefinitionContext', variable: Union[str, Variable]) -> bool:
+        if isinstance(variable, Variable):
+            return variable.name in self.variable_name2obj
+        return variable in self.variable_name2obj
+
+    def get_variable(self, variable: Union[str, Variable]) -> Variable:
+        if isinstance(variable, Variable):
+            return variable
+        if variable not in self.variable_name2obj:
+            raise ValueError(f'Unknown variable: {variable}; available variables: {self.variables}.')
+        return self.variable_name2obj[variable]
+
     def __getitem__(self, variable: Union[str, Variable]) -> 'VariableExpression':
         return self.wrap_variable(variable)
 
@@ -244,6 +313,7 @@ class ExpressionDefinitionContext(object):
 
     @contextlib.contextmanager
     def mark_is_effect_definition(self, is_effect_definition: bool):
+        """`is_effect_definition` is a boolean flag that indicates whether the current expression is defined in an effect of an operator. This function is a context manager and is only used in planning tasks."""
         self.is_effect_definition_stack.append(is_effect_definition)
         yield self
         self.is_effect_definition_stack.pop()
@@ -268,25 +338,49 @@ class ExpressionDefinitionContext(object):
 get_expression_definition_context: Callable[[], Optional[ExpressionDefinitionContext]] = gen_get_default(ExpressionDefinitionContext)
 
 
-class ObjectOutputExpression(Expression):
+class ObjectOrValueOutputExpression(Expression, ABC):
     @property
-    def return_type(self) -> ObjectType:
+    def return_type(self) -> Union[ObjectType, ValueType, SequenceType]:
         raise NotImplementedError()
 
     def __str__(self) -> str:
         raise NotImplementedError()
 
 
-class ValueOutputExpression(Expression):
+class ObjectOutputExpression(ObjectOrValueOutputExpression, ABC):
     @property
-    def return_type(self) -> ValueType:
+    def return_type(self) -> Union[ObjectType, SequenceType]:
         raise NotImplementedError()
 
     def __str__(self) -> str:
         raise NotImplementedError()
 
 
-class VariableExpression(Expression):
+class ValueOutputExpression(ObjectOrValueOutputExpression, ABC):
+    @property
+    def return_type(self) -> Union[ValueType, SequenceType]:
+        raise NotImplementedError()
+
+    def __str__(self) -> str:
+        raise NotImplementedError()
+
+
+class NullExpression(ObjectOrValueOutputExpression):
+    def __init__(self, dtype: Union[ObjectType, ValueType, SequenceType]):
+        self.dtype = dtype
+
+    dtype: Union[ObjectType, ValueType, SequenceType]
+    """The type of the null expression."""
+
+    @property
+    def return_type(self) -> Union[ObjectType, ValueType, SequenceType]:
+        return self.dtype
+
+    def __str__(self) -> str:
+        return 'null'
+
+
+class VariableExpression(ObjectOrValueOutputExpression):
     def __init__(self, variable: Variable):
         self.variable = variable
 
@@ -309,17 +403,29 @@ class VariableExpression(Expression):
         return f'V::{self.name}'
 
 
-class VariableAssignmentExpression(Expression, ABC):
+VariableOrValueOutputExpression = Union[VariableExpression, ValueOutputExpression]
+VariableOrObjectOutputExpression = Union[VariableExpression, ObjectOutputExpression]
+
+
+class VariableAssignmentExpression(Expression):
     @property
     def return_type(self):
         return None
 
+    def __str__(self):
+        raise NotImplementedError()
+
 
 class ObjectConstantExpression(ObjectOutputExpression):
-    def __init__(self, constant: Union[ObjectConstant, ListValue]):
+    def __init__(self, constant: Union[ObjectConstant, StateObjectReference]):
+        if isinstance(constant, StateObjectReference):
+            assert constant.dtype is not None, 'StateObjectReference must have a dtype.'
+            constant = ObjectConstant(constant.name, constant.dtype)
+        if isinstance(constant, ListValue):
+            raise ValueError('ObjectConstantExpression does not accept ListValue.')
         self.constant = constant
 
-    constant: Union[ObjectConstant, ListValue]
+    constant: ObjectConstant
     """The object constant."""
 
     @property
@@ -332,14 +438,12 @@ class ObjectConstantExpression(ObjectOutputExpression):
     @property
     def dtype(self) -> Union[ObjectType, ListType]:
         """The type of the object."""
-        if isinstance(self.constant, ListValue):
-            return self.constant.dtype
         return self.constant.dtype
 
     @property
     def is_constant_list(self):
         """Whether the object is a constant list."""
-        return isinstance(self.constant, ListValue)
+        return isinstance(self.constant.name, ListValue)
 
     @property
     def return_type(self) -> Union[ObjectType, ListType]:
@@ -347,9 +451,11 @@ class ObjectConstantExpression(ObjectOutputExpression):
 
     def __str__(self) -> str:
         if self.is_constant_list:
-            constant_str = ' '.join(x.name for x in self.constant.values)
-            return f'OBJ::{{{constant_str}}}'
-        return f'OBJ::{self.name}'
+            if isinstance(self.constant.name.values, slice):
+                return 'O::[...]'
+            constant_str = ' '.join(x.name for x in self.constant.name.values)
+            return f'O::{{{constant_str}}}'
+        return f'O::{self.name}'
 
 
 class ConstantExpression(ValueOutputExpression):
@@ -392,17 +498,34 @@ class ConstantExpression(ValueOutputExpression):
     def float32(cls, value):
         return cls(torch.tensor(value, dtype=torch.float32), FLOAT32)
 
+    @classmethod
+    def string(cls, value):
+        return cls(value, STRING)
+
+    @classmethod
+    def from_value(cls, value, dtype: Optional[ValueType] = None):
+        if isinstance(value, bool):
+            return cls(torch.tensor(bool(value), dtype=torch.int64), dtype if dtype is not None else BOOL)
+        elif isinstance(value, int):
+            return cls(torch.tensor(value, dtype=torch.int64), dtype if dtype is not None else INT64)
+        elif isinstance(value, float):
+            return cls(torch.tensor(value, dtype=torch.float32), dtype if dtype is not None else FLOAT32)
+        elif isinstance(value, str):
+            return cls(value, dtype if dtype is not None else STRING)
+        else:
+            raise ValueError(f'Unknown value type: {type(value)}.')
+
     def __str__(self):
         if isinstance(self.constant, TensorValue) and self.constant.is_single_elem:
-            return f'Const::{self.constant.single_elem()}'
-        return str(self.constant)
+            return f'C::{self.constant.single_elem()}'
+        return f'C::{self.constant}'
 
 
 ConstantExpression.TRUE = ConstantExpression.true()
 ConstantExpression.FALSE = ConstantExpression.false()
 
 
-class ListCreationExpression(Expression):
+class ListCreationExpression(ObjectOrValueOutputExpression):
     def __init__(self, arguments: Sequence[ValueOutputExpression], element_type: Optional[TypeBase] = None):
         self.arguments = tuple(arguments)
 
@@ -464,65 +587,156 @@ class FunctionApplicationError(Exception):
 class FunctionApplicationExpression(ValueOutputExpression):
     """Function application expression represents the application of a function over a list of arguments."""
 
-    def __init__(self, function: Function, arguments: Iterable[Expression]):
+    def __init__(self, function: Function, arguments: Iterable[ObjectOrValueOutputExpression], batch: str = 'mixed'):
         self.function = function
         self.arguments = tuple(arguments)
+        self.batch = batch
+        self.inferred_batch = batch
+        self._return_type = AutoType
+
+        assert batch in ['mixed', 'inner', 'outer'], f'Unknown batch type: {batch}. Allowed values are "mixed", "inner", "outer".'
+
         self.check_arguments()
 
     function: Function
     """The function to be applied."""
 
-    arguments: Tuple[Expression, ...]
+    arguments: Tuple[ObjectOrValueOutputExpression, ...]
     """The list of arguments to the function."""
 
     def _check_arguments(self):
         try:
             if len(self.function.arguments) != len(self.arguments):
                 raise TypeError('Argument number mismatch: expect {}, got {}.'.format(len(self.function.arguments), len(self.arguments)))
+
+            is_simple_arguments = self.function.ftype.is_simple_arguments
+
+            is_inner = self.batch == 'inner'
+            is_outer = self.batch == 'outer'
+            if is_simple_arguments:
+                found_multi_arity = False
+                for arg in self.arguments:
+                    if arg.return_type.is_uniform_sequence_type:
+                        if isinstance(arg, ObjectConstantExpression) and isinstance(arg.constant, StateObjectList) and arg.constant.is_qindex:
+                            pass
+                        else:
+                            if arg.return_type.is_batched_list_type and arg.return_type.ndim > 1:
+                                found_multi_arity = True
+                                break
+                if is_outer and found_multi_arity:
+                    raise ValueError('Outer batch does not support multi-arity arguments.')
+            else:
+                assert not is_inner and not is_outer, 'Batched function does not support inner/outer batch.'
+
+            inner_batched_arguments = None
+            outer_batched_arguments = list()
             for i, (arg_def, arg) in enumerate(zip(self.function.arguments, self.arguments)):
-                if isinstance(arg_def, Variable):
-                    if isinstance(arg, VariableExpression):
-                        if not arg.dtype.downcast_compatible(arg_def.dtype):
-                            raise FunctionApplicationError(i, arg_def.dtype, arg.dtype)
-                    elif isinstance(arg, ObjectConstantExpression):
-                        if not arg.dtype.downcast_compatible(arg_def.dtype):
-                            raise FunctionApplicationError(i, arg_def.dtype, arg.dtype)
-                    elif isinstance(arg, ConstantExpression):
-                        if not arg.return_type.downcast_compatible(arg_def.dtype):
-                            raise FunctionApplicationError(i, arg_def.dtype, arg.return_type)
-                    elif isinstance(arg, (FunctionApplicationExpression, GeneralizedQuantificationExpression)):
-                        if not arg.return_type.downcast_compatible(arg_def.dtype):
-                            raise FunctionApplicationError(i, arg_def.dtype, arg.return_type)
-                    else:
-                        raise FunctionApplicationError(i, 'VariableExpression or ObjectConstantExpression or ConstantExpression or FunctionApplication', type(arg))
-                elif isinstance(arg_def, ValueType):
-                    if isinstance(arg, ValueOutputExpression):
-                        pass
-                    elif isinstance(arg, VariableExpression) and isinstance(arg.return_type, ValueType):
-                        pass
-                    elif isinstance(arg, ConstantExpression):
-                        pass
-                    else:
-                        raise FunctionApplicationError(i, 'ValueOutputExpression', type(arg))
-                    if arg_def != arg.return_type:
-                        raise FunctionApplicationError(i, arg_def, arg.return_type)
-                else:
+                # arg_def: the definition of the argument in the function signature
+                # arg: the actual argument being returned
+                if not isinstance(arg_def, Variable):
                     raise TypeError('Unknown argument definition type: {}.'.format(type(arg_def)))
+                if not isinstance(arg, ObjectOrValueOutputExpression):
+                    raise TypeError('Unknown argument value type: {}.'.format(type(arg)))
+
+                argdef_dtype: TypeBase = arg_def.dtype
+                arg_dtype: TypeBase = arg.return_type
+
+                if is_simple_arguments:
+                    if not arg_dtype.downcast_compatible(argdef_dtype, allow_self_list=True):
+                        raise FunctionApplicationError(i, argdef_dtype, arg_dtype)
+                    if arg_dtype.is_uniform_sequence_type:
+                        if isinstance(arg, ObjectConstantExpression) and isinstance(arg.constant.name, StateObjectList) and arg.constant.name.is_qindex:
+                            if is_inner:
+                                new_inner_batched_arguments = (argdef_dtype, )
+                                if inner_batched_arguments is None:
+                                    inner_batched_arguments = new_inner_batched_arguments
+                                elif inner_batched_arguments != (AutoType, ) and inner_batched_arguments != new_inner_batched_arguments:
+                                    raise ValueError(f'Inconsistent inner batched arguments: prev={inner_batched_arguments} vs this={new_inner_batched_arguments}.')
+                            else:  # Outer or Mixed
+                                outer_batched_arguments.append(argdef_dtype)
+                        else:
+                            if is_inner:
+                                if arg_dtype.is_batched_list_type:
+                                    new_inner_batched_arguments = (argdef_dtype, )
+                                    if inner_batched_arguments is None:
+                                        inner_batched_arguments = new_inner_batched_arguments
+                                    elif inner_batched_arguments != (AutoType, ) and inner_batched_arguments != new_inner_batched_arguments:
+                                        raise ValueError(f'Inconsistent inner batched arguments: prev={inner_batched_arguments} vs this={new_inner_batched_arguments}.')
+                                elif arg_dtype.is_list_type:
+                                    new_inner_batched_arguments = (arg_dtype.element_type, )
+                                    if inner_batched_arguments is None:
+                                        inner_batched_arguments = new_inner_batched_arguments
+                                    elif len(inner_batched_arguments) != 1:
+                                        raise ValueError(f'Inconsistent inner batched arguments: prev={inner_batched_arguments} vs this={new_inner_batched_arguments}.')
+                                else:
+                                    raise ValueError(f'Unknown inner batched argument type: {arg_dtype}.')
+                            else:  # Outer or Mixed
+                                if arg_dtype.is_batched_list_type:
+                                    arg_dtype: BatchedListType
+                                    outer_batched_arguments.extend(arg_dtype.index_dtypes)
+                                elif arg_dtype.is_list_type:
+                                    outer_batched_arguments.append(arg_dtype.element_type)
+                                else:
+                                    raise ValueError(f'Unknown outer batched argument type: {arg_dtype}.')
+                else:
+                    if not arg_dtype.downcast_compatible(argdef_dtype):
+                        raise FunctionApplicationError(i, argdef_dtype, arg_dtype)
+
+            if is_simple_arguments:
+                if is_inner:
+                    if inner_batched_arguments is None:
+                        self._return_type = self.function.return_type
+                    else:
+                        if inner_batched_arguments == (AutoType, ):
+                            self._return_type = ListType(self.function.return_type)
+                        else:
+                            self._return_type = BatchedListType(self.function.return_type, inner_batched_arguments)
+                elif is_outer:
+                    if len(outer_batched_arguments) == 0:
+                        self._return_type = self.function.return_type
+                    else:
+                        self._return_type = BatchedListType(self.function.return_type, outer_batched_arguments)
+                else:
+                    if inner_batched_arguments is None:
+                        if len(outer_batched_arguments) == 0:
+                            self._return_type = self.function.return_type
+                        else:
+                            self._return_type = BatchedListType(self.function.return_type, outer_batched_arguments)
+                    else:
+                        if len(outer_batched_arguments) == 0:
+                            if inner_batched_arguments == (AutoType, ):
+                                self._return_type = ListType(self.function.return_type)
+                            else:
+                                self._return_type = BatchedListType(self.function.return_type, inner_batched_arguments)
+                        else:
+                            self._return_type = BatchedListType(self.function.return_type, inner_batched_arguments + tuple(outer_batched_arguments))
+            else:
+                self._return_type = self.function.return_type
         except (TypeError, FunctionApplicationError) as e:
             error_header = 'Error during applying {}.\n'.format(str(self.function))
             try:
                 arguments_str = ', '.join(str(arg) for arg in self.arguments)
-                error_header += ' Arguments: {}\n'.format(arguments_str)
+                error_header += '  Arguments: {}\n'.format(arguments_str)
             except Exception:  # noqa
                 pass
+            print(error_header)
+            print(e)
+            import ipdb; ipdb.set_trace()
             raise TypeError(error_header + str(e)) from e
 
     @property
     def return_type(self) -> ValueType:
-        return self.function.return_type
+        return self._return_type
 
     def __str__(self) -> str:
-        fmt = self.function.name + '('
+        if self.batch == 'mixed':
+            fmt = self.function.name + '('
+        elif self.batch == 'inner':
+            fmt = self.function.name + '[[inner]]('
+        elif self.batch == 'outer':
+            fmt = self.function.name + '[[outer]]('
+        else:
+            raise ValueError(f'Unknown batch type: {self.batch}.')
         arg_fmt = [str(x) for x in self.arguments]
         arg_fmt_len = [len(x) for x in arg_fmt]
 
@@ -544,7 +758,7 @@ class FunctionApplicationExpression(ValueOutputExpression):
 class ListFunctionApplicationExpression(ValueOutputExpression):
     """Function application expression represents the application of a function over a list of arguments."""
 
-    def __init__(self, function: Function, arguments: Iterable[Expression]):
+    def __init__(self, function: Function, arguments: Iterable[ObjectOrValueOutputExpression]):
         self.function = function
         self.arguments = tuple(arguments)
         self.check_arguments()
@@ -552,7 +766,7 @@ class ListFunctionApplicationExpression(ValueOutputExpression):
     function: Function
     """The function to be applied."""
 
-    arguments: Tuple[Expression, ...]
+    arguments: Tuple[ObjectOrValueOutputExpression, ...]
     """The list of arguments to the function."""
 
     def _check_arguments(self):
@@ -654,7 +868,12 @@ class ConditionalSelectExpression(ValueOutputExpression):
         return self.predicate.return_type
 
     def __str__(self):
-        return f'cond-select({self.predicate} if {self.condition})'
+        predicate_str = str(self.predicate)
+        condition_str = str(self.condition)
+
+        if len(predicate_str) + len(condition_str) + 2 < 80:
+            return f'cond-select({predicate_str} if {condition_str})'
+        return f'cond-select({predicate_str} if\n{indent_text(condition_str)})'
 
 
 class DeicticSelectExpression(ValueOutputExpression):
@@ -684,16 +903,20 @@ class BoolOpType(JacEnum):
     AND = 'and'
     OR = 'or'
     NOT = 'not'
+    XOR = 'xor'
+    IMPLIES = 'implies'
 
 
 class BoolExpression(ValueOutputExpression):
+    OpType = BoolOpType
+
     def __init__(self, bool_op_type: BoolOpType, arguments: Sequence[ValueOutputExpression]):
         self.bool_op = bool_op_type
         self.arguments = tuple(arguments)
         self.check_arguments()
 
     bool_op: BoolOpType
-    """The boolean operation. Can be AND, OR, NOT."""
+    """The boolean operation. Can be AND, OR, NOT, XOR, IMPLIES."""
 
     arguments: Tuple[ValueOutputExpression, ...]
     """The list of arguments."""
@@ -701,16 +924,21 @@ class BoolExpression(ValueOutputExpression):
     def _check_arguments(self):
         if self.bool_op is BoolOpType.NOT:
             assert len(self.arguments) == 1, f'Number of arguments for NotOp should be 1, got: {len(self.arguments)}.'
+        if self.bool_op is BoolOpType.IMPLIES:
+            assert len(self.arguments) == 2, f'Number of arguments for ImpliesOp should be 2, got: {len(self.arguments)}.'
         for i, arg in enumerate(self.arguments):
-            assert isinstance(arg, ValueOutputExpression), f'BoolOp only accepts ValueOutputExpressions, got argument #{i} of type {type(arg)}.'
+            assert isinstance(arg, (VariableExpression, ValueOutputExpression)), f'BoolOp only accepts ValueOutputExpressions, got argument #{i} of type {type(arg)}.'
 
     @property
     def return_type(self) -> ValueType:
         return self.arguments[0].return_type
 
     def __str__(self):
-        arguments = ', '.join([str(arg) for arg in self.arguments])
-        return f'{self.bool_op.value}({arguments})'
+        argument_strings = [str(arg) for arg in self.arguments]
+        if sum(len(x) for x in argument_strings) < 80:
+            return f'{self.bool_op.value}({", ".join(argument_strings)})'
+        arguments = ',\n'.join([indent_text(x) for x in argument_strings])
+        return f'{self.bool_op.value}(\n{arguments}\n)'
 
 
 class AndExpression(BoolExpression):
@@ -744,12 +972,34 @@ class NotExpression(BoolExpression):
         super().__init__(BoolOpType.NOT, [arg])
 
 
+class XorExpression(BoolExpression):
+    bool_op: BoolOpType
+    """The boolean operation. Must be :py:attr:`BoolOpType.XOR`."""
+
+    arguments: Tuple[ValueOutputExpression, ...]
+
+    def __init__(self, *arguments: ValueOutputExpression):
+        super().__init__(BoolOpType.XOR, arguments)
+
+
+class ImpliesExpression(BoolExpression):
+    bool_op: BoolOpType
+    """The boolean operation. Must be :py:attr:`BoolOpType.IMPLIES`."""
+
+    arguments: Tuple[ValueOutputExpression, ValueOutputExpression]
+
+    def __init__(self, lhs: ValueOutputExpression, rhs: ValueOutputExpression):
+        super().__init__(BoolOpType.IMPLIES, [lhs, rhs])
+
+
 class QuantificationOpType(JacEnum):
     FORALL = 'forall'
     EXISTS = 'exists'
 
 
 class QuantificationExpression(ValueOutputExpression):
+    OpType = QuantificationOpType
+
     def __init__(self, quantification_op: QuantificationOpType, variable: Variable, expr: ValueOutputExpression):
         self.quantification_op = quantification_op
         self.variable = variable
@@ -831,6 +1081,150 @@ class ExistsExpression(QuantificationExpression):
     expression: ValueOutputExpression
 
 
+class FindOneExpression(ObjectOutputExpression):
+    def __init__(self, variable: Variable, expr: ValueOutputExpression):
+        self.variable = variable
+        self.expression = expr
+        self.check_arguments()
+
+    variable: Variable
+    """The quantified variable."""
+
+    expression: ValueOutputExpression
+    """The internal expression."""
+
+    def _check_arguments(self):
+        assert isinstance(self.expression, ValueOutputExpression), f'FindAllOp only accepts ValueOutputExpressions, got type {type(self.expression)}.'
+        assert isinstance(self.variable.dtype, ObjectType)
+
+    @property
+    def return_type(self) -> ObjectType:
+        return self.variable.dtype
+
+    def __str__(self):
+        return f'findone({self.variable}: {self.expression})'
+
+
+class FindAllExpression(ObjectOutputExpression):
+    def __init__(self, variable: Variable, expr: ValueOutputExpression):
+        self.variable = variable
+        self.expression = expr
+        self.check_arguments()
+
+    variable: Variable
+    """The quantified variable."""
+
+    expression: ValueOutputExpression
+    """The internal expression."""
+
+    def _check_arguments(self):
+        assert isinstance(self.expression, ValueOutputExpression), f'FindAllOp only accepts ValueOutputExpressions, got type {type(self.expression)}.'
+        assert isinstance(self.variable.dtype, ObjectType)
+
+    @property
+    def return_type(self) -> ListType:
+        return ListType(self.variable.dtype)
+
+    def __str__(self):
+        return f'findall({self.variable}: {self.expression})'
+
+
+class CompareOpType(JacEnum):
+    EQ = '=='
+    NEQ = '!='
+    LT = '<'
+    LEQ = '<='
+    GT = '>'
+    GEQ = '>='
+
+
+class _CompareExpressionBase(ValueOutputExpression, ABC):
+    OpType = CompareOpType
+
+    def __init__(self, compare_op: CompareOpType, lhs: ObjectOrValueOutputExpression, rhs: ObjectOrValueOutputExpression):
+        self.compare_op = compare_op
+        self.lhs = lhs
+        self.rhs = rhs
+
+        self.check_arguments()
+
+    @property
+    def arguments(self) -> Tuple[ObjectOrValueOutputExpression, ObjectOrValueOutputExpression]:
+        return self.lhs, self.rhs
+
+    @property
+    def return_type(self) -> ValueType:
+        return BOOL
+
+    def __str__(self):
+        return f'({self.lhs} {self.compare_op.value} {self.rhs})'
+
+
+class ObjectCompareExpression(_CompareExpressionBase):
+    def _check_arguments(self):
+        assert self.compare_op in (CompareOpType.EQ, CompareOpType.NEQ), f'ObjectCompareExpression only accepts EQ and NEQ, got {self.compare_op}.'
+        assert isinstance(self.lhs.return_type, ObjectType), f'lhs of ObjectCompareExpression must be of type ObjectType, got {self.lhs.return_type}.'
+        assert isinstance(self.rhs.return_type, ObjectType), f'rhs of ObjectCompareExpression must be of type ObjectType, got {self.rhs.return_type}.'
+
+    compare_op: CompareOpType
+    """The comparison operation."""
+
+    lhs: Union[ObjectOutputExpression, VariableExpression]
+    """The left-hand side of the comparison."""
+
+    rhs: Union[ObjectOutputExpression, VariableExpression]
+    """The right-hand side of the comparison."""
+
+
+class ValueCompareExpression(_CompareExpressionBase):
+    def _check_arguments(self):
+        assert isinstance(self.lhs.return_type, ValueType), f'lhs of ValueCompareExpression must be of type ValueType, got {self.lhs.return_type}.'
+        assert isinstance(self.rhs.return_type, ValueType), f'rhs of ValueCompareExpression must be of type ValueType, got {self.rhs.return_type}.'
+
+    compare_op: CompareOpType
+    """The comparison operation."""
+
+    lhs: ValueOutputExpression
+    """The left-hand side of the comparison."""
+
+    rhs: ValueOutputExpression
+    """The right-hand side of the comparison."""
+
+
+class ConditionExpression(ValueOutputExpression):
+    def __init__(self, condition: ValueOutputExpression, true_value: ValueOutputExpression, false_value: ValueOutputExpression):
+        self.condition = condition
+        self.true_value = true_value
+        self.false_value = false_value
+        self.check_arguments()
+
+    condition: ValueOutputExpression
+    """The condition expression."""
+
+    true_value: ValueOutputExpression
+    """The true value expression."""
+
+    false_value: ValueOutputExpression
+    """The false value expression."""
+
+    def _check_arguments(self):
+        assert isinstance(self.condition, ValueOutputExpression) and self.condition.return_type == BOOL, f'Condition must be a boolean expression, got {self.condition}.'
+        assert self.true_value.return_type == self.false_value.return_type, f'True value and false value must have the same type, got {self.true_value.return_type} and {self.false_value.return_type}.'
+
+    @property
+    def return_type(self) -> ValueType:
+        return self.true_value.return_type
+
+    def __str__(self):
+        condition_str = str(self.condition)
+        true_value_str = str(self.true_value)
+        false_value_str = str(self.false_value)
+
+        if len(condition_str) + len(true_value_str) + len(false_value_str) + 4 < 80:
+            return f'cond({condition_str} ? {true_value_str} : {false_value_str})'
+        return f'cond({condition_str} ?\n{indent_text(true_value_str)}\n{indent_text(false_value_str)})'
+
+
 class _PredicateValueExpression(Expression, ABC):
     def __init__(self, predicate: Union[VariableExpression, FunctionApplicationExpression], value: ValueOutputExpression):
         self.predicate = predicate
@@ -840,7 +1234,22 @@ class _PredicateValueExpression(Expression, ABC):
     def _check_arguments(self):
         try:
             rtype = self.predicate.return_type
-            if rtype.assignment_type() != self.value.return_type:
+            if rtype.is_uniform_sequence_type:
+                element_rtype = rtype.element_type
+            else:
+                element_rtype = rtype
+            parent_type = element_rtype.assignment_type().parent_type
+            if parent_type is not None and parent_type.typename in ('bool', 'int64', 'float32', 'string'):
+                if self.value.return_type.typename == parent_type.typename:
+                    return
+            if parent_type is not None and parent_type.is_vector_value_type and self.value.return_type.is_list_type and self.value.return_type.element_type == parent_type.dtype:
+                return
+            if parent_type is not None and parent_type.is_vector_value_type and self.value.return_type.is_vector_value_type:
+                return
+            if parent_type is not None and parent_type.is_vector_value_type and self.value.return_type.is_scalar_value_type:
+                # Handle cases such as x[:] = True
+                return
+            if element_rtype.assignment_type() != self.value.return_type:
                 raise FunctionApplicationError(0, f'{self.predicate.return_type}(assignment type is {rtype.assignment_type()})', self.value.return_type)
         except TypeError as e:
             raise e
@@ -876,7 +1285,7 @@ class AssignExpression(_PredicateValueExpression, VariableAssignmentExpression):
     def __init__(self, predicate: FunctionApplicationExpression, value: ValueOutputExpression):
         _PredicateValueExpression.__init__(self, predicate, value)
 
-    predicate: Union[VariableExpression, FunctionApplicationExpression]
+    predicate: FunctionApplicationExpression
     """The predicate expression, must be a :class:`FunctionApplicationExpression` which refers to a state variable."""
 
     value: ValueOutputExpression
@@ -884,10 +1293,10 @@ class AssignExpression(_PredicateValueExpression, VariableAssignmentExpression):
 
     def _check_arguments(self):
         super()._check_arguments()
-        assert isinstance(self.predicate, FunctionApplicationExpression), 'AssignOp only support dest type FunctionApplication, got {}.'.format(type(self.predicate))
+        assert isinstance(self.predicate, (ListFunctionApplicationExpression, FunctionApplicationExpression)), 'AssignOp only support dest type FunctionApplication, got {}.'.format(type(self.predicate))
 
     def __str__(self):
-        return f'assign({self.predicate}: {self.value})'
+        return f'assign{{{self.predicate}: {self.value}}}'
 
 
 class ConditionalAssignExpression(_PredicateValueExpression, VariableAssignmentExpression):
@@ -895,7 +1304,7 @@ class ConditionalAssignExpression(_PredicateValueExpression, VariableAssignmentE
         self.condition = condition
         _PredicateValueExpression.__init__(self, feature, value)
 
-    predicate: Union[VariableExpression, FunctionApplicationExpression]
+    predicate: FunctionApplicationExpression
     """The predicate expression, must be a :class:`FunctionApplicationExpression` which refers to a state variable."""
 
     value: ValueOutputExpression
@@ -909,7 +1318,7 @@ class ConditionalAssignExpression(_PredicateValueExpression, VariableAssignmentE
         assert isinstance(self.condition, ValueOutputExpression) and self.condition.return_type == BOOL
 
     def __str__(self):
-        return f'cond-assign({self.predicate}: {self.value} if {self.condition})'
+        return f'cond-assign{{{self.predicate}: {self.value} if {self.condition}}}'
 
 
 class DeicticAssignExpression(VariableAssignmentExpression):
@@ -928,7 +1337,7 @@ class DeicticAssignExpression(VariableAssignmentExpression):
         assert isinstance(self.variable.dtype, ObjectType)
 
     def __str__(self):
-        return f'deictic-assign({self.variable}: {self.expression})'
+        return f'deictic-assign{{{self.variable}: {self.expression}}}'
 
 
 ExpressionCompatible = Union[Expression, Variable, str, ObjectConstant, bool, int, float, torch.Tensor, ValueBase]
@@ -1016,7 +1425,7 @@ def get_type(value: Any) -> Union[TypeBase, Tuple[TypeBase, ...]]:
         return value.return_type
     elif isinstance(value, ValueBase):
         return value.dtype
-    elif isinstance(value, (bool, int, float, str)):
+    elif isinstance(value, (bool, int, float, complex, str)):
         return AutoType
     else:
         raise ValueError(f'Unknown value type: {type(value)}.')
@@ -1032,6 +1441,10 @@ def get_types(args=None, kwargs=None):
     if len(ret) == 1:
         return ret[0]
     return tuple(ret)
+
+
+def is_null_expression(expr: Expression) -> bool:
+    return isinstance(expr, NullExpression)
 
 
 def is_object_output_expression(expr: Expression) -> TypeGuard[ObjectOutputExpression]:
@@ -1058,6 +1471,14 @@ def is_not_expr(expr: Expression) -> TypeGuard[NotExpression]:
     return isinstance(expr, BoolExpression) and expr.bool_op is BoolOpType.NOT
 
 
+def is_xor_expr(expr: Expression) -> TypeGuard[XorExpression]:
+    return isinstance(expr, BoolExpression) and expr.bool_op is BoolOpType.XOR
+
+
+def is_implies_expr(expr: Expression) -> TypeGuard[ImpliesExpression]:
+    return isinstance(expr, BoolExpression) and expr.bool_op is BoolOpType.IMPLIES
+
+
 def is_constant_bool_expr(expr: Expression) -> TypeGuard[ConstantExpression]:
     if isinstance(expr, ConstantExpression) and expr.return_type == BOOL:
         return True
@@ -1070,85 +1491,4 @@ def is_forall_expr(expr: Expression) -> TypeGuard[ForallExpression]:
 
 def is_exists_expr(expr: Expression) -> TypeGuard[ExistsExpression]:
     return isinstance(expr, QuantificationExpression) and expr.quantification_op is QuantificationOpType.EXISTS
-
-
-def iter_exprs(expr: Expression) -> Iterable[Expression]:
-    """Iterate over all sub-expressions of the input."""
-    yield expr
-    if isinstance(expr, (FunctionApplicationExpression, ListFunctionApplicationExpression)):
-        for arg in expr.arguments:
-            yield from iter_exprs(arg)
-    elif isinstance(expr, ListCreationExpression):
-        for arg in expr.arguments:
-            yield from iter_exprs(arg)
-    elif isinstance(expr, ListExpansionExpression):
-        yield from iter_exprs(expr.expression)
-    elif isinstance(expr, BoolExpression):
-        for arg in expr.arguments:
-            yield from iter_exprs(arg)
-    elif isinstance(expr, QuantificationExpression):
-        yield from iter_exprs(expr.expression)
-    elif isinstance(expr, GeneralizedQuantificationExpression):
-        yield from iter_exprs(expr.expression)
-    elif isinstance(expr, PredicateEqualExpression):
-        yield from iter_exprs(expr.predicate)
-        yield from iter_exprs(expr.value)
-    elif isinstance(expr, AssignExpression):
-        yield from iter_exprs(expr.value)
-    elif isinstance(expr, ConditionalSelectExpression):
-        yield from iter_exprs(expr.predicate)
-        yield from iter_exprs(expr.condition)
-    elif isinstance(expr, ConditionalAssignExpression):
-        yield from iter_exprs(expr.value)
-        yield from iter_exprs(expr.condition)
-    elif isinstance(expr, (DeicticSelectExpression, DeicticAssignExpression)):
-        yield from iter_exprs(expr.expression)
-    elif isinstance(expr, (VariableExpression, ConstantExpression, ObjectConstantExpression)):
-        pass
-    else:
-        raise TypeError('Unknown expression type: {}.'.format(type(expr)))
-
-
-def find_free_variables(expr: Expression) -> Tuple[Variable, ...]:
-    free_variables = dict()
-    bounded_variables = dict()
-
-    def dfs(e: Expression):
-        if isinstance(e, VariableExpression):
-            if e.variable.name not in bounded_variables:
-                free_variables[e.variable.name] = e.variable
-        elif isinstance(e, ListCreationExpression):
-            [dfs(arg) for arg in e.arguments]
-        elif isinstance(e, ListExpansionExpression):
-            dfs(e.expression)
-        elif isinstance(e, (QuantificationExpression, GeneralizedQuantificationExpression)):
-            bounded_variables[e.variable.name] = e.variable
-            dfs(e.expression)
-            del bounded_variables[e.variable.name]
-        elif isinstance(e, (FunctionApplicationExpression, ListFunctionApplicationExpression)):
-            [dfs(arg) for arg in e.arguments]
-        elif isinstance(e, BoolExpression):
-            [dfs(arg) for arg in e.arguments]
-        elif isinstance(e, PredicateEqualExpression):
-            dfs(e.predicate)
-            dfs(e.value)
-        elif isinstance(e, AssignExpression):
-            dfs(e.value)
-        elif isinstance(e, ConditionalSelectExpression):
-            dfs(e.predicate)
-            dfs(e.condition)
-        elif isinstance(e, ConditionalAssignExpression):
-            dfs(e.value)
-            dfs(e.condition)
-        elif isinstance(e, (DeicticSelectExpression, DeicticAssignExpression)):
-            bounded_variables[e.variable.name] = e.variable
-            dfs(e.expression)
-            del bounded_variables[e.variable.name]
-        elif isinstance(e, (ConstantExpression, ObjectConstantExpression)):
-            pass
-        else:
-            raise TypeError('Unknown expression type: {}.'.format(type(e)))
-
-    dfs(expr)
-    return tuple(free_variables.values())
 

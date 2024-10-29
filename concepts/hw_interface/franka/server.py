@@ -8,22 +8,27 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
+from typing import TYPE_CHECKING, Optional, Tuple
+
 import numpy as np
-from typing import Tuple
 from jacinle.logging import get_logger
 from jacinle.comm.service import Service, SocketClient
 
+if TYPE_CHECKING:
+    import franka_interface
+    from concepts.hw_interface.realsense.device import RealSenseDevice
+
 logger = get_logger(__file__)
 
-__all__ = ['FrankaService', 'FrankaClient']
+__all__ = ['FrankaService', 'FrankaServiceClient']
 
 
 class FrankaService(Service):
     DEFAULT_PORTS = [12345, 12346]
 
-    arm: 'franka_interface.ArmInterface'
-    camera: 'RealSenseDevice'
-    camera_extrinsics: np.ndarray
+    arm: Optional['franka_interface.ArmInterface']
+    camera: Optional['RealSenseDevice']
+    camera_extrinsics: Optional[np.ndarray]
 
     def initialize(self):
         self.arm = None
@@ -145,7 +150,7 @@ class FrankaService(Service):
         return self.camera_extrinsics
 
 
-class FrankaClient(SocketClient):
+class FrankaServiceClient(SocketClient):
     def __init__(self, server: str, name='franka-client', port_pair=None, automatic_reset_errors: bool = True):
         if port_pair is None:
             port_pair = FrankaService.DEFAULT_PORTS
@@ -185,17 +190,20 @@ class FrankaClient(SocketClient):
     def reset_errors(self) -> None:
         return self.call('reset_errors')
 
-    def open_gripper(self) -> None:
-        self.call('open_gripper')
-        self.call('reset_errors')
+    def open_gripper(self, width: float = 0.2) -> None:
+        self.call('open_gripper', width)
+        if self.automatic_reset_errors:
+            self.call('reset_errors')
 
     def close_gripper(self) -> None:
         self.call('close_gripper')
-        self.call('reset_errors')
+        if self.automatic_reset_errors:
+            self.call('reset_errors')
 
     def grasp_gripper(self, width: float = 0.05, force: float = 40):
         self.call('grasp_gripper', width, force)
-        self.call('reset_errors')
+        if self.automatic_reset_errors:
+            self.call('reset_errors')
 
     def get_qpos(self) -> np.ndarray:
         return self.call('get_qpos')

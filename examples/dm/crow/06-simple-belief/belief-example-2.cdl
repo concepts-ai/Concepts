@@ -1,0 +1,20 @@
+problem "belief-example-1"
+domain "belief.cdl"
+
+objects:
+  R1, R2: Room
+  O1, O2: Object
+
+init:
+  object_at[O1, R1] = 0.5
+  object_at[O1, R2] = 0.01
+  object_at[O2, R1] = 0.01
+  object_at[O2, R2] = 0.5
+  robot_at[R1] = 1.0
+
+behavior __goal__():
+  body:
+    do move(R2)
+    do move(R2)
+    do look_for(R2, O2)
+    do pick(R2, O2)

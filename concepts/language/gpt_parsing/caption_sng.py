@@ -8,10 +8,10 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
-import openai
 from dataclasses import dataclass
 from typing import Any, Tuple, Dict
-from concepts.language.gpt_parsing.utils import TagNotUniqueError, load_prompt, extract_tag
+from concepts.language.openai_utils.default_client import get_default_client
+from concepts.language.openai_utils.llm_prompting_utils import TagNotUniqueError, load_prompt, extract_tag
 
 
 @dataclass
@@ -26,19 +26,20 @@ class CaptionSNGParser(object):
         self.max_tokens = max_tokens
 
     def parse(self, sentence: str) -> Dict[str, Any]:
-        response = openai.ChatCompletion.create(
+        client = get_default_client()
+        response = client.chat.completions.create(
             model='gpt-3.5-turbo',
             messages=[
                 self.prompt[0],  # the system prmopt
                 {'role': 'user', 'content': sentence}
             ],
-            max_tokens=self.max_tokens,
+            max_tokens=self.max_tokens
         )
 
         parsing = None
         exception = None
         try:
-            parsing = self.extract(response['choices'][0]['message']['content'])
+            parsing = self.extract(response.choices[0].message.content)
         except TagNotUniqueError as e:
             exception = e
 

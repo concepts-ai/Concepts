@@ -1,0 +1,105 @@
+# Over-simplified version of the RWI (robot-world-item) domain.
+# It models the pick-and-place task simply with holding(x) vs. on(x, y). It does not model details about grasp, obstacles, etc.
+
+typedef Hand: object
+typedef Object: object
+typedef Pose: vector[float32, 7]
+typedef Qpos: vector[float32, 7]
+
+typedef GraspParam: pyobject
+typedef Traj: pyobject
+
+feature [[state]] moveable(x: Object) -> bool
+feature [[state]] holding(hand: Hand, x: Object) -> bool
+feature [[state]] holding_grasp(hand: Hand, x: Object) -> GraspParam
+feature [[state]] hand_available(hand: Hand) -> bool
+feature [[state]] qpos_of(hand: Hand) -> Qpos
+feature [[state]] pose_of(x: Object) -> Pose
+
+def holding_at_pose(hand: Hand, x: Object, grasp: GraspParam):
+  return holding_grasp(hand, x) == grasp
+
+def at_qpos(hand: Hand, qpos: Qpos):
+  return qpos_of(hand) == qpos
+
+def at_pose(x: Object, pose: Pose):
+  return pose_of(x) == pose
+
+def on_with_pose(x: Object, y: Object, x_pose: Pose, y_pose: Pose):
+  """Primitive function. If x is on y."""
+
+def on(x: Object, y: Object):
+  return on_with_pose(x, y, pose_of[x], pose_of[y])
+
+def [[simulation]] valid_grasp(hand: Hand, x: Object, grasp: GraspParam) -> bool:
+  """Primitive function. If the grasp is valid. Note that it does not depend on the pose of the object because we have already marked this function as [[simulation]]."""
+
+def [[simulation]] valid_placement(hand: Hand, x: Object, y: Object, x_pose: Pose) -> bool:
+  """Primitive function. If the placement is valid. Note that it does not depend on the pose of the object Y since we have simplified the domain so that Y is always a non-moving object."""
+
+def [[simulation]] valid_grasp_traj(hand: Hand, x: Object, grasp: GraspParam, traj: Traj) -> bool:
+  """Primitive function. If the trajectory is valid."""
+
+def [[simulation]] valid_placement_traj(hand: Hand, x: Object, y: Object, x_pose: Pose, traj: Traj) -> bool:
+  """Primitive function. If the trajectory is valid."""
+
+generator [[simulation]] gen_valid_grasp(hand: Hand, x: Object, grasp: GraspParam):
+  goal: valid_grasp(hand, x, grasp)
+  in: hand, x
+  out: grasp
+
+generator [[simulation]] gen_valid_placement(hand: Hand, x: Object, y: Object, x_pose: Pose):
+  goal: valid_placement(hand, x, y, x_pose)
+  in: hand, x, y
+  out: x_pose
+
+generator [[simulation]] gen_valid_grasp_traj(hand: Hand, x: Object, grasp: GraspParam, traj: Traj):
+  goal: valid_grasp_traj(hand, x, grasp, traj)
+  in: hand, x, grasp
+  out: traj
+
+generator [[simulation]] gen_valid_placement_traj(hand: Hand, x: Object, y: Object, x_pose: Pose, traj: Traj):
+  goal: valid_placement_traj(hand, x, y, x_pose, traj)
+  in: hand, x, y, x_pose
+  out: traj
+
+# Primitive controller. Execute the trajectory and close the gripper at the end.
+# Note that here we do not take Hand as an argument because we currently only have one hand...
+controller ctl_grasp(traj: Traj)
+
+# Primitive controller. Execute the trajectory and open the gripper at the end.
+# Note that here we do not take Hand as an argument because we currently only have one hand...
+controller ctl_place(traj: Traj)
+
+
+behavior pick(hand: Hand, x: Object):
+  goal: holding(hand, x)
+  body:
+    assert moveable(x)
+    bind grasp: GraspParam where:
+      valid_grasp(hand, x, grasp)
+    bind traj: Traj where:
+      valid_grasp_traj(hand, x, grasp, traj)
+    ctl_grasp(traj)
+  eff:
+    holding[hand, x] = True
+    holding_grasp[hand, x] = grasp
+    hand_available[hand] = False
+    [[simulation]] qpos_of[hand] = ...
+
+
+behavior place_on(x: Object, y: Object):
+  goal: on(x, y)
+  body:
+    bind hand: Hand
+    achieve holding(hand, x)
+    bind x_pose: Pose where:
+      valid_placement(hand, x, y, x_pose)
+    bind traj: Traj where:
+      valid_placement_traj(hand, x, y, x_pose, traj)
+    ctl_place(traj)
+  eff:
+    holding[hand, x] = False
+    hand_available[hand] = True
+    [[simulation]] pose_of[x] = ...
+

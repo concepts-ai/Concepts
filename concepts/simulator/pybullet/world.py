@@ -11,17 +11,23 @@
 import time
 import inspect
 import collections
-import six
-from typing import Any, Optional, Union, Iterable, Tuple, List, Dict
+from typing import Any, Optional, Union, Iterable, Tuple, List, Dict, Callable
 
 import numpy as np
 import open3d as o3d
 import pybullet as p
 
+from jacinle.utils.printing import indent_text
+from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate, rotate_vector_batch
+from concepts.math.frame_utils_xyzw import compose_transformation
 from concepts.simulator.pybullet.camera import CameraConfig
-from concepts.simulator.pybullet.rotation_utils import quat_mul, quat_conjugate, rotate_vector_batch, compose_transformation
 
-__all__ = ['BodyState', 'JointState', 'LinkState', 'DebugCameraState', 'JointInfo', 'ContactInfo', 'BulletSaver', 'GroupSaver', 'BodyStateSaver', 'JointStateSaver', 'BodyFullStateSaver', 'WorldSaver', 'BulletWorld']
+__all__ = [
+    'BodyState', 'JointState', 'LinkState', 'DebugCameraState',
+    'JointInfo', 'ContactInfo', 'ConstraintInfo',
+    'BulletSaver', 'GroupSaver', 'BodyStateSaver', 'JointStateSaver', 'BodyFullStateSaver', 'WorldSaver',
+    'WorldSaverBuiltin', 'BulletWorld'
+]
 
 
 class _NameToIdentifier(object):
@@ -34,9 +40,19 @@ class _NameToIdentifier(object):
         self.string_to_int[s] = i
 
     def __getitem__(self, item):
-        if isinstance(item, six.string_types):
+        if isinstance(item, str):
             return self.string_to_int[item]
         return self.int_to_string[item]
+
+    def as_string(self, item: Union[str, int]) -> str:
+        if isinstance(item, str):
+            return item
+        return self.int_to_string[item]
+
+    def as_identifier(self, item: Union[str, int, Tuple[int, int]]) -> Union[int, Tuple[int, int]]:
+        if isinstance(item, str):
+            return self.string_to_int[item]
+        return item
 
     def __len__(self):
         return len(self.int_to_string)
@@ -54,6 +70,10 @@ class BodyState(collections.namedtuple('_BodyState', ['position', 'orientation',
     @property
     def pos(self):
         return self.position
+
+    @property
+    def quat(self):
+        return self.orientation
 
     @property
     def quat_xyzw(self):
@@ -74,7 +94,7 @@ class JointState(collections.namedtuple('_JointState', ['position', 'velocity'])
     pass
 
 
-class LinkState(collections.namedtuple('_LinkState', ['position', 'orientation'])):
+class LinkState(collections.namedtuple('_LinkState', ['position', 'orientation', 'linear_velocity', 'angular_velocity'])):
     @property
     def pos(self):
         return self.position
@@ -144,6 +164,22 @@ class CollisionShapeData(collections.namedtuple('_CollisionShapeInfo', [
     'filename',
     'local_pos',
     'local_orn',
+    'world_pos',  # the position relative to the world frame
+    'world_orn',  # the orientation relative to the world frame
+])):
+    pass
+
+
+class VisualShapeData(collections.namedtuple('_VisualShapeInfo', [
+    'object_unique_id',
+    'link_index',
+    'shape_type',
+    'dimensions',
+    'filename',
+    'local_pos',
+    'local_orn',
+    'rgba_color',
+    'texture_unique_id',
     'world_pos',  # the position relative to the world frame
     'world_orn',  # the orientation relative to the world frame
 ])):
@@ -222,14 +258,35 @@ class ConstraintInfo(collections.namedtuple('_ConstraintInfo', [
 
 
 class BulletSaver(object):
-    def __init__(self, world: 'BulletWorld'):
-        self.world = world
+    def __init__(self, client_id: int, world: Optional['BulletWorld'] = None):
+        self.client_id = client_id
+        self._world = world
 
     def save(self):
         pass
 
     def restore(self):
         raise NotImplementedError()
+
+    def reset_client_id(self, client_id: int, world: Optional['BulletWorld'] = None):
+        self.client_id = client_id
+        self._world = world
+
+    def reset_world(self, world: 'BulletWorld'):
+        self._world = world
+
+    @property
+    def world(self) -> 'BulletWorld':
+        if self._world is None:
+            raise RuntimeError('The world object is not set.')
+        return self._world
+
+    # Before pickling, delete self.world to avoid pickling the entire world object
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if k != '_world'}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     def __enter__(self):
         self.save()
@@ -240,10 +297,10 @@ class BulletSaver(object):
 
 
 class GroupSaver(BulletSaver):
-    def __init__(self, savers: Iterable[BulletSaver]):
+    def __init__(self, client_id: int, savers: Iterable[BulletSaver]):
+        super().__init__(client_id)
         savers = tuple(savers)
         assert len(savers) > 0, 'savers should not be empty'
-        super().__init__(savers[0].world)
         self.savers = savers
 
     def save(self):
@@ -254,48 +311,68 @@ class GroupSaver(BulletSaver):
         for saver in self.savers:
             saver.restore()
 
+    def reset_client_id(self, client_id: int):
+        super().reset_client_id(client_id)
+        for saver in self.savers:
+            saver.reset_client_id(client_id)
+
+    def __str__(self):
+        return 'GroupSaver({}){{\n'.format(len(self.savers)) + '\n'.join(indent_text(str(saver)) for saver in self.savers) + '\n}'
+
 
 class BodyStateSaver(BulletSaver):
     def __init__(self, world: 'BulletWorld', body_id: int, state: Optional[BodyState] = None, save: bool = True):
-        super().__init__(world)
+        super().__init__(world.client_id)
         self.body_id = body_id
-        self.body_name = self.world.body_names.int_to_string.get(body_id, None)
+        self.body_name = world.body_names.int_to_string.get(body_id, None)
+        self.state = None
 
         if save:
-            self.save(state)
+            self.save(state=state)
 
     def save(self, state: Optional[BodyState] = None):
-        if state is None:
-            state = self.world.get_body_state_by_id(self.body_id)
-        self.state = state
+        if state is not None:
+            self.state = ((state.position, state.orientation), (state.linear_velocity, state.angular_velocity))
+        else:
+            self.state = (p.getBasePositionAndOrientation(self.body_id, physicsClientId=self.client_id), p.getBaseVelocity(self.body_id, physicsClientId=self.client_id))
 
     def restore(self):
-        self.world.set_body_state_by_id(self.body_id, self.state)
+        p.resetBasePositionAndOrientation(self.body_id, self.state[0][0], self.state[0][1], physicsClientId=self.client_id)
+        p.resetBaseVelocity(self.body_id, self.state[1][0], self.state[1][1], physicsClientId=self.client_id)
+
+    def __str__(self):
+        return 'BodyState({}, state={})'.format(self.body_name or self.body_id, self.state)
 
     def __repr__(self):
         return '{}({})'.format(self.__class__.__name__, self.body_name or self.body_id)
 
 
 class JointStateSaver(BulletSaver):
-    def __init__(self, world: 'BulletWorld', body_id: int, joint_ids: Optional[List[int]] = None, states: Optional[List[JointState]] = None, save: bool = True):
-        super().__init__(world)
+    def __init__(self, world: 'BulletWorld', body_id: int, joint_ids: Optional[List[int]] = None, state: Optional[List[JointState]] = None, save: bool = True):
+        super().__init__(world.client_id)
         self.body_id = body_id
-        self.body_name = self.world.body_names.int_to_string.get(body_id, None)
+        self.body_name = world.body_names.int_to_string.get(body_id, None)
+        self.joint_ids = joint_ids if joint_ids is not None else world.get_free_joints(body_id)
+        self.states = None
 
         if save:
-            self.save(joint_ids, states)
+            self.save(state=state)
 
-    def save(self, joint_ids: Optional[List[int]] = None, states: Optional[List[JointState]] = None):
-        if joint_ids is None:
-            joint_ids = self.world.get_free_joints(self.body_id)
-        self.joint_ids = joint_ids
-        if states is None:
-            states = [self.world.get_joint_state_by_id(self.body_id, joint_id) for joint_id in joint_ids]
-        self.states = states
+    def save(self, state: Optional[List[JointState]] = None):
+        if state is not None:
+            self.states = [(s.position, s.velocity) for s in state]
+        else:
+            self.states = [
+                p.getJointState(self.body_id, joint_id, physicsClientId=self.client_id)
+                for joint_id in self.joint_ids
+            ]
 
     def restore(self):
         for joint_id, state in zip(self.joint_ids, self.states):
-            self.world.set_joint_state_by_id(self.body_id, joint_id, state)
+            p.resetJointState(self.body_id, joint_id, state[0], state[1], physicsClientId=self.client_id)
+
+    def __str__(self):
+        return 'JointState({}, states={})'.format(self.body_name or self.body_id, {joint_id: state for joint_id, state in zip(self.joint_ids, self.states)})
 
     def __repr__(self):
         return '{}({})'.format(self.__class__.__name__, self.body_name or self.body_id)
@@ -305,20 +382,28 @@ class BodyFullStateSaver(BulletSaver):
     """Save and restore the full state of a body. That is, including both the state of the base link and all joints."""
 
     def __init__(self, world: 'BulletWorld', body_id: int, save: bool = True):
-        super().__init__(world)
+        super().__init__(world.client_id)
         self.body_id = body_id
-        self.body_name = self.world.body_names.int_to_string.get(body_id, None)
+        self.body_name = world.body_names.int_to_string.get(body_id, None)
 
         self.pose_saver = BodyStateSaver(world, body_id, save=save)
         self.joint_saver = JointStateSaver(world, body_id, save=save)
 
-    def save(self, body_state: Optional[BodyState] = None, joint_ids: Optional[List[int]] = None, joint_states: Optional[List[JointState]] = None):
+    def save(self, body_state: Optional[BodyState] = None, joint_states: Optional[List[JointState]] = None):
         self.pose_saver.save(body_state)
-        self.joint_saver.save(joint_ids, joint_states)
+        self.joint_saver.save(joint_states)
 
     def restore(self):
         self.pose_saver.restore()
         self.joint_saver.restore()
+
+    def reset_client_id(self, client_id: int, world: Optional['BulletWorld'] = None):
+        super().reset_client_id(client_id, world)
+        self.pose_saver.reset_client_id(client_id, world)
+        self.joint_saver.reset_client_id(client_id, world)
+
+    def __str__(self):
+        return 'BodyFullState({}\n  pose={}\n  joints={})'.format(self.body_name or self.body_id, self.pose_saver.state, {joint_id: state for joint_id, state in zip(self.joint_saver.joint_ids, self.joint_saver.states)})
 
     def __repr__(self):
         return '{}({})'.format(self.__class__.__name__, self.body_name or self.body_id)
@@ -326,44 +411,69 @@ class BodyFullStateSaver(BulletSaver):
 
 class WorldSaver(BulletSaver):
     def __init__(self, world: 'BulletWorld', body_ids: Optional[List[int]] = None, save: bool = True):
-        super().__init__(world)
-        self.body_savers = list()
-        self.body_ids = body_ids
+        super().__init__(world.client_id)
+
+        self.body_ids = body_ids or list(world.body_names.int_to_string.keys())
+        self.body_savers = [BodyFullStateSaver(world, body_id, save=False) for body_id in self.body_ids]
+        self.additional_savers = [saver() for saver in world.additional_state_savers.values()]
 
         if save:
             self.save()
 
     def save(self):
-        if len(self.body_savers) == 0:
-            if self.body_ids is None:
-                self.body_ids = list(self.world.body_names.int_to_string.keys())
-            self.body_savers = [BodyFullStateSaver(self.world, body_id, save=True) for body_id in self.body_ids]
-        else:
-            for body_saver in self.body_savers:
-                body_saver.save()
+        for body_saver in self.body_savers:
+            body_saver.save()
+        for saver in self.additional_savers:
+            saver.save()
 
     def restore(self):
         for body_saver in self.body_savers:
             body_saver.restore()
+        for saver in self.additional_savers:
+            saver.restore()
+
+    def reset_client_id(self, client_id: int, world: Optional['BulletWorld'] = None):
+        super().reset_client_id(client_id)
+        for body_saver in self.body_savers:
+            body_saver.reset_client_id(client_id, world)
+        for saver in self.additional_savers:
+            saver.reset_client_id(client_id, world)
+
+    def __str__(self):
+        return 'WorldSaver({}){{\n'.format(self.body_ids) + '\n'.join(indent_text(str(saver)) for saver in self.body_savers) + '\n}'
+
+    def __repr__(self):
+        return '{}({})'.format(self.__class__.__name__, self.body_ids)
 
 
-class WorldSaverV2(BulletSaver):
+class WorldSaverBuiltin(BulletSaver):
     def __init__(self, world: 'BulletWorld', save: bool = True):
-        super().__init__(world)
+        super().__init__(world.client_id)
 
         self.saved_id = None
+        self.additional_savers = [saver() for saver in world.additional_state_savers.values()]
         if save:
             self.save()
 
     def save(self):
-        self.saved_id = p.saveState(physicsClientId=self.world.client_id)
+        self.saved_id = p.saveState(physicsClientId=self.client_id)
+        for saver in self.additional_savers:
+            saver.save()
+
+    def clear(self):
+        if self.saved_id is not None:
+            p.removeState(self.saved_id, physicsClientId=self.client_id)
+            self.saved_id = None
 
     def restore(self):
         if self.saved_id is None:
             raise RuntimeError('No state has been saved.')
-        p.restoreState(self.saved_id, physicsClientId=self.world.client_id)
-        p.removeState(self.saved_id, physicsClientId=self.world.client_id)
+        p.restoreState(self.saved_id, physicsClientId=self.client_id)
+        p.removeState(self.saved_id, physicsClientId=self.client_id)
         self.saved_id = None
+
+        for saver in self.additional_savers:
+            saver.restore()
 
 
 def _geometry_cache(type_id: int, geom_name_template: str):
@@ -395,11 +505,37 @@ class BulletWorld(object):
         self.global_names = _NameToIdentifier()
         self.body_base_link: Dict[str, str] = dict()
         self.body_groups: Dict[str, List[int]] = dict()
+        self.managed_interfaces: Dict[str, Any] = dict()
+        self.additional_state_savers: Dict[str, Callable[[], BulletSaver]] = dict()
 
         self.cached_geometries: Dict[Tuple[int, str], Any] = dict()
 
         if self.client_id is not None:
             self.refresh_names()
+
+    body_names: _NameToIdentifier
+    """The mapping from body name to body index."""
+
+    link_names: _NameToIdentifier
+    """The mapping from link name to link index."""
+
+    joint_names: _NameToIdentifier
+    """The mapping from joint name to joint index."""
+
+    global_names: _NameToIdentifier
+    """The mapping from global name to global identifier."""
+
+    body_base_link: Dict[str, str]
+    """The mapping from body name to base link name."""
+
+    body_groups: Dict[str, List[int]]
+    """The mapping from group name to body indices."""
+
+    managed_interfaces: Dict[str, Any]
+    """The mapping from identifiers to interface objects."""
+
+    additional_state_savers: Dict[str, Callable[[], BulletSaver]]
+    """The mapping from identifiers to additional state savers."""
 
     def set_client_id(self, client_id):
         self.client_id = client_id
@@ -487,11 +623,15 @@ class BulletWorld(object):
     def get_link_name(self, body_id: int, link_id: int) -> str:
         return self.link_names.int_to_string[(body_id, link_id)]
 
-    def get_body_index(self, body_name: str) -> int:
-        return self.body_names.string_to_int[body_name]
+    def get_body_index(self, body_name: Union[str, int]) -> int:
+        if isinstance(body_name, str):
+            return self.body_names.string_to_int[body_name]
+        return body_name
 
-    def get_link_index(self, link_name: str) -> LinkIdentifier:
-        return self.link_names.string_to_int[link_name]
+    def get_link_index(self, link_name: Union[str, LinkIdentifier, Tuple[int, int]]) -> LinkIdentifier:
+        if isinstance(link_name, str):
+            return self.link_names.string_to_int[link_name]
+        return link_name
 
     def get_link_index_with_body(self, body_id: int, link_name: str) -> int:
         body_name = self.body_names.int_to_string[body_id]
@@ -540,9 +680,29 @@ class BulletWorld(object):
         for name, q in zip(names, qpos):
             self.set_qpos(name, q)
 
-    def set_batched_qpos_by_id(self, body_index, joint_indices, qpos):
-        for index, q in zip(joint_indices, qpos):
-            p.resetJointState(body_index, index, q, physicsClientId=self.client_id)
+    def set_batched_qpos_by_id(self, body_id, joint_ids, qpos):
+        for index, q in zip(joint_ids, qpos):
+            p.resetJointState(body_id, index, q, physicsClientId=self.client_id)
+
+    def get_qvel(self, name):
+        info = self.get_joint_state(name)
+        return info.velocity
+
+    def get_qvel_by_id(self, body_id, joint_id):
+        info = self.get_joint_state_by_id(body_id, joint_id)
+        return info.velocity
+
+    def get_batched_qvel(self, names, numpy=True):
+        rv = [self.get_qvel(name) for name in names]
+        if numpy:
+            return np.array(rv)
+        return rv
+
+    def get_batched_qvel_by_id(self, body_id, joint_ids, numpy=True):
+        rv = [self.get_qvel_by_id(body_id, joint_id) for joint_id in joint_ids]
+        if numpy:
+            return np.array(rv)
+        return rv
 
     def get_state(self, name: str, type: Optional[str] = None) -> Union[BodyState, LinkState, JointState]:
         if ':' in name:
@@ -574,6 +734,18 @@ class BulletWorld(object):
 
     def __getitem__(self, item):
         return self.get_state(item)
+
+    def register_additional_state_saver(self, name: str, saver_factory: Callable[[], BulletSaver]):
+        self.additional_state_savers[name] = saver_factory
+
+    def unregister_additional_state_saver(self, name: str):
+        del self.additional_state_savers[name]
+
+    def register_managed_interface(self, name: str, interface: Any):
+        self.managed_interfaces[name] = interface
+
+    def unregister_managed_interface(self, name: str):
+        del self.managed_interfaces[name]
 
     def get_debug_camera(self) -> DebugCameraState:
         return DebugCameraState(*p.getDebugVisualizerCamera(physicsClientId=self.client_id))
@@ -636,18 +808,25 @@ class BulletWorld(object):
     def set_joint_state(self, joint_name: str, state: JointState):
         self.set_joint_state_by_id(*self.joint_names[joint_name], state)
 
+    def set_joint_state2_by_id(self, body_id: int, joint_id: int, position: float, velocity: float = 0.0):
+        p.resetJointState(body_id, joint_id, position, velocity, physicsClientId=self.client_id)
+
+    def set_joint_state2(self, joint_name: str, position: float, velocity: float = 0.0):
+        self.set_joint_state2_by_id(*self.joint_names[joint_name], position, velocity)
+
     def get_link_state_by_id(self, body_id: int, link_id: int, fk=False) -> LinkState:
         if link_id == -1:
             state = p.getBasePositionAndOrientation(body_id, physicsClientId=self.client_id)
-            return LinkState(np.array(state[0]), np.array(state[1]))
-        state = p.getLinkState(body_id, link_id, computeForwardKinematics=fk, physicsClientId=self.client_id)
-        return LinkState(np.array(state[0]), np.array(state[1]))
+            vel = p.getBaseVelocity(body_id, physicsClientId=self.client_id)
+            return LinkState(np.array(state[0]), np.array(state[1]), np.array(vel[0]), np.array(vel[1]))
+        state = p.getLinkState(body_id, link_id, computeForwardKinematics=fk, computeLinkVelocity=fk, physicsClientId=self.client_id)
+        return LinkState(np.array(state[0]), np.array(state[1]), np.array(state[6]), np.array(state[7]))
 
     def get_link_state(self, link_name: str, fk=False) -> LinkState:
         return self.get_link_state_by_id(*self.link_names[link_name], fk=fk)
 
     def get_collision_shape_data(self, body_name: str) -> List[CollisionShapeData]:
-        body_id = self.body_names[body_name]
+        body_id = self.body_names.as_identifier(body_name)
         return self.get_collision_shape_data_by_id(body_id)
 
     def get_collision_shape_data_by_id(self, body_id: int) -> List[CollisionShapeData]:
@@ -662,6 +841,22 @@ class BulletWorld(object):
                 output_data.append(CollisionShapeData(*shape_data, world_pos, world_orn))
         return output_data
 
+    def get_visual_shape_data(self, body_name: str) -> List[VisualShapeData]:
+        body_id = self.body_names.as_identifier(body_name)
+        return self.get_visual_shape_data_by_id(body_id)
+
+    def get_visual_shape_data_by_id(self, body_id: int) -> List[VisualShapeData]:
+        output_data = list()
+        for i in range(-1, p.getNumJoints(body_id, physicsClientId=self.client_id)):
+            link_state = self.get_link_state_by_id(body_id, i, fk=True)
+
+            data_list = p.getVisualShapeData(body_id, i, physicsClientId=self.client_id)
+            for shape_data in data_list:
+                world_pos, world_orn = compose_transformation(link_state.position, link_state.orientation, shape_data[5], shape_data[6])
+                # world_pos, world_orn = p.multiplyTransforms(link_state.position, link_state.orientation, shape_data[5], shape_data[6], physicsClientId=self.client_id)
+                output_data.append(VisualShapeData(*shape_data, world_pos, world_orn))
+        return output_data
+
     def get_free_joints(self, body_id: int) -> List[int]:
         """Get a list of indices corresponding to all non-fixed joints in the body."""
         all_joints = list()
@@ -672,6 +867,9 @@ class BulletWorld(object):
 
     def get_constraint(self, constraint_id: int) -> ConstraintInfo:
         return ConstraintInfo(*p.getConstraintInfo(constraint_id, physicsClientId=self.client_id))
+
+    def perform_collision_detection(self):
+        p.performCollisionDetection(physicsClientId=self.client_id)
 
     def get_contact(self, a: Optional[Union[int, LinkIdentifier, str]] = None, b: Optional[Union[int, LinkIdentifier, str]] = None, update: bool = False) -> List[ContactInfo]:
         if update:
@@ -706,6 +904,68 @@ class BulletWorld(object):
             time.sleep(0.001)
         return [ContactInfo(self, *c) for c in contacts]
 
+    def check_collision(self, a: Union[int, LinkIdentifier, str], b: Union[int, LinkIdentifier, str], update: bool = False) -> bool:
+        return len(self.get_contact(a, b, update=update)) > 0
+
+    def check_collision_single(self, a: Union[int, LinkIdentifier, str], ignored_objects: List[int], ignore_self_collision: bool = True, update: bool = False) -> bool:
+        """Check if the object is in collision with any object other than the ignored objects."""
+        contacts = self.get_contact(a, update=update)
+        for contact in contacts:
+            if isinstance(a, int) and ignore_self_collision and contact.body_b == a:
+                continue
+            if contact.body_b not in ignored_objects:
+                return True
+        return False
+
+    def get_single_contact_normal(self, object_id: int, support_object_id: int, deviation_tol: float = 0.05, return_center: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        body_names = self.body_names.int_to_string
+        object_name, support_name = body_names[object_id], body_names[support_object_id]
+        contacts = self.get_contact(object_id, support_object_id)
+
+        if len(contacts) == 0:
+            # TODO(Jiayuan Mao @ 2023/03/15): find a better way to configure this.
+            # self.client.step(1)
+            p.stepSimulation(physicsClientId=self.client_id)
+            contacts = self.get_contact(object_id, support_object_id)
+
+        if len(contacts) == 0:
+            raise ValueError(f'No contact between {object_name} and {support_name}.')
+
+        contact_normals = np.array([c.contact_normal_on_b for c in contacts])
+        contact_normal_avg = np.mean(contact_normals, axis=0)
+        contact_normal_avg /= np.linalg.norm(contact_normal_avg)
+
+        deviations = np.abs(1 - contact_normals.dot(contact_normal_avg) / np.linalg.norm(contact_normals, axis=1))
+        if np.max(deviations) > deviation_tol:
+            raise ValueError(
+                f'Contact normals of {object_name} and {support_name} are not consistent. This is likely due to multiple contact points.\n'
+                f'  Contact normals: {contact_normals}\n  Deviations: {deviations}.'
+            )
+
+        if return_center:
+            centers = np.array([c.position_on_b for c in contacts])
+            center = np.mean(centers, axis=0)
+            return center, contact_normal_avg
+
+        return contact_normal_avg
+
+    def get_supporting_objects_by_id(self, body_id: int, return_name: bool = True) -> List[Union[str, int]]:
+        """Get the bodies that are supporting the given body."""
+        all_contact = self.get_contact(body_id)
+        supported_by_list = set()
+        for contact in all_contact:
+            body_name = contact.body_b_name
+            if body_name == 'robot':
+                continue
+
+            normal = contact.contact_normal_on_b
+            if normal[2] > np.cos(np.deg2rad(45)):
+                if return_name:
+                    supported_by_list.add(body_name)
+                else:
+                    supported_by_list.add(contact.body_b)
+        return list(supported_by_list)
+
     def update_contact(self):
         p.performCollisionDetection(physicsClientId=self.client_id)
 
@@ -715,8 +975,8 @@ class BulletWorld(object):
     def save_world(self) -> WorldSaver:
         return WorldSaver(self)
 
-    def save_world_v2(self) -> WorldSaverV2:
-        return WorldSaverV2(self)
+    def save_world_builtin(self) -> WorldSaverBuiltin:
+        return WorldSaverBuiltin(self)
 
     def save_body(self, body_identifier: Union[str, int]) -> BodyFullStateSaver:
         if isinstance(body_identifier, int):
@@ -818,7 +1078,15 @@ class BulletWorld(object):
         return rotate_vector_batch(raw_pcd, quat_xyzw) + pos
 
     def get_mesh(self, body_id: int, zero_center: bool = True, verbose: bool = False, mesh_filename: Optional[str] = None, mesh_scale: float = 1.0) -> o3d.geometry.TriangleMesh:
-        """Get the point cloud of a body."""
+        """Get the point cloud of a body.
+
+        Args:
+            body_id: the ID of the body.
+            zero_center: whether to zero-center the mesh (i.e., move the center of the mesh to the origin).
+            verbose: whether to print debug information.
+            mesh_filename: the filename of the mesh. This should be provided if the body has a mesh shape but we can't get it from the collision shape data.
+            mesh_scale: the scale of the mesh. This should be provided if the body has a mesh shape but we can't get it from the collision shape data.
+        """
 
         base_mesh = o3d.geometry.TriangleMesh()
         body_state = self.get_body_state_by_id(body_id)
@@ -881,3 +1149,24 @@ class BulletWorld(object):
         mesh.rotate(rotation_matrix2, center=np.array([0, 0, 0]))
         mesh.translate(pos)
         return mesh
+
+    def get_mesh_info(self, body_id: int, link_id: int = -1) -> Tuple[str, float, np.ndarray, np.ndarray]:
+        """Get the mesh filename and transform of a body or link."""
+        visual_data = self.get_visual_shape_data_by_id(body_id)[link_id + 1]
+        mesh_filename = visual_data.filename.decode('utf-8')
+        scale = visual_data.dimensions[0]
+        pos = visual_data.world_pos
+        orn = visual_data.world_orn
+        return mesh_filename, scale, pos, orn
+
+    def get_all_mesh_info(self, body_id: int) -> List[Tuple[str, float, np.ndarray, np.ndarray]]:
+        """Get the mesh filenames and transforms of all links of a body."""
+        visual_data = self.get_visual_shape_data_by_id(body_id)
+        filenames_and_transforms = []
+        for data in visual_data:
+            mesh_filename = data.filename.decode('utf-8')
+            scale = data.dimensions[0]
+            pos = data.world_pos
+            orn = data.world_orn
+            filenames_and_transforms.append((mesh_filename, scale, pos, orn))
+        return filenames_and_transforms

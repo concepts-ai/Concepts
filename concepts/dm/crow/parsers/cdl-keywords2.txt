@@ -1,0 +1,12 @@
+False
+None
+True
+and
+bool
+float32
+int64
+not
+object
+or
+pyobject
+string

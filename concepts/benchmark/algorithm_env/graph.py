@@ -13,8 +13,6 @@ from typing import Optional
 import copy
 import numpy as np
 
-import jacinle.random as random
-
 __all__ = ['Graph', 'random_generate_graph', 'random_generate_graph_dnc', 'random_generate_special_graph']
 
 
@@ -104,47 +102,55 @@ class Graph(object):
         return conn
 
 
-def random_generate_graph(n, p, directed=False) -> Graph:
+def random_generate_graph(n: int, p: float, directed: bool = False, np_random: Optional[np.random.RandomState] = None) -> Graph:
     """Randomly generate a graph by sampling the existence of each edge.
     Each edge between nodes has the probability `p` (directed) or `p^2` (undirected) to not exist.
 
     This paradigm is also called the Erdős–Rényi model.
 
     Args:
-        n: The number of nodes in the graph.
+        n: the number of nodes in the graph.
         p: the probability that a edge doesn't exist in directed graph.
-        directed: Directed or Undirected graph. Default: `False` (undirected).
+        directed: directed or Undirected graph. Default: `False` (undirected).
+        np_random: the random state.
 
     Returns:
-        graph: Generated graph.
+        graph: generated graph.
     """
-    edges = (random.rand(n, n) < p).astype(np.float32)
+    if np_random is None:
+        np_random = np.random
+
+    edges = (np_random.rand(n, n) < p).astype(np.float32)
     edges -= edges * np.eye(n)
     if not directed:
         edges = np.maximum(edges, edges.T)
     return Graph(n, edges)
 
 
-def random_generate_graph_dnc(n, p=None, directed=False) -> Graph:
+def random_generate_graph_dnc(n: int, p: Optional[float] = None, directed: bool = False, np_random: Optional[np.random.RandomState] = None) -> Graph:
     """Random graph generation method as in DNC, the Differentiable Neural Computer paper.
     Sample :math:`n` nodes in a unit square. sample out-degree (:math:`m`) of each nodes,
     connect to :math:`m` nearest neighbors (Euclidean distance) in the unit square.
 
     Args:
-        n: The number of nodes in the graph.
-        p: Control the range of the sample of out-degree. Default: :math:`[1, n // 3]`
+        n: the number of nodes in the graph.
+        p: control the range of the sample of out-degree. Default: :math:`[1, n // 3]`
 
             - (float): :math:`[1, int(n * p)]`
             - (int): :math:`[1, p]`
             - (tuple): :math:`[p[0], p[1]]`
 
-        directed: Directed or Undirected graph. Default: `False` (undirected)
+        directed: directed or Undirected graph. Default: `False` (undirected)
+        np_random: the random state.
 
     Returns:
         graph: A randomly generated graph.
     """
+    if np_random is None:
+        np_random = np.random
+
     edges = np.zeros((n, n), dtype=np.float32)
-    pos = random.rand(n, 2)
+    pos = np_random.rand(n, 2)
 
     def dist(x, y):
         return ((x - y) ** 2).mean()
@@ -167,7 +173,7 @@ def random_generate_graph_dnc(n, p=None, directed=False) -> Graph:
 
     for i in range(n):
         d = []
-        k = random.randint(upper - lower + 1) + lower
+        k = np_random.randint(upper - lower + 1) + lower
         for j in range(n):
             if i != j:
                 d.append((dist(pos[i], pos[j]), j))
@@ -179,22 +185,26 @@ def random_generate_graph_dnc(n, p=None, directed=False) -> Graph:
     return Graph(n, edges, pos)
 
 
-def random_generate_special_graph(n: int, graph_type: str, directed: bool = False) -> Graph:
+def random_generate_special_graph(n: int, graph_type: str, directed: bool = False, np_random: Optional[np.random.RandomState] = None) -> Graph:
     """Randomly generate a special type graph.
 
     For list graph, the nodes are randomly permuted and connected in order. If the graph is directed, the edges are
     directed from the first node to the last node.
 
     Args:
-        n: The number of nodes in the graph.
-        graph_type: The type of the graph, e.g. list, tree. Currently only support list.
-        directed: Directed or Undirected graph. Default: `False` (undirected).
+        n: the number of nodes in the graph.
+        graph_type: the type of the graph, e.g. list, tree. Currently only support list.
+        directed: directed or Undirected graph. Default: `False` (undirected).
+        np_random: the random state.
 
     Returns:
         graph: Generated graph.
     """
+    if np_random is None:
+        np_random = np.random
+
     if graph_type == 'list':
-        nodes = random.permutation(n)
+        nodes = np_random.permutation(n)
         edges = np.zeros((n, n))
         for i in range(n - 1):
             x, y = nodes[i], nodes[i + 1]

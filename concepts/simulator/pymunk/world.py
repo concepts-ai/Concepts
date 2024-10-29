@@ -13,7 +13,7 @@ import random
 from typing import Any, Optional, Tuple, Dict
 
 from concepts.algorithm.configuration_space import BoxConfigurationSpace, CollisionFreeProblemSpace
-from concepts.utils.range import Range
+from concepts.math.range import Range
 
 __all__ = ['PymunkWorld', 'PymunkSingleObjectConfigurationSpace', 'PymunkCollisionFreeProblemSpace']
 
@@ -31,7 +31,7 @@ class PymunkWorld(pymunk.Space):
         self.body_selectable = dict()
         self.selectable_bodies = list()
 
-    def add_body(self, body, selectable=False, label=None) -> pymunk.Body:
+    def add_body(self, body, shapes=None, selectable=False, label=None) -> pymunk.Body:
         """Add a body to the space.
 
         Args:
@@ -42,7 +42,11 @@ class PymunkWorld(pymunk.Space):
         Returns:
             The body added.
         """
-        self.add(body, *body.shapes)
+
+        if shapes is None:
+            shapes = list(body.shapes)
+
+        self.add(body, *shapes)
         self.label2body[label] = body
         self.body2label[body] = label
         self.body_selectable[body] = selectable
@@ -60,6 +64,14 @@ class PymunkWorld(pymunk.Space):
             yield body, self.body_selectable[body], self.body2label[body]
 
     def select_body(self, point: Tuple[float, float]) -> Optional[pymunk.Body]:
+        """Select a body by a point.
+
+        Args:
+            point: the point to select the body.
+
+        Returns:
+            The body selected. None if no body is selected.
+        """
         import concepts.simulator.pymunk.body_utils as body_utils
         return body_utils.select_body(self, point, self.selectable_bodies)
 

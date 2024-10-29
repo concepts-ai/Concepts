@@ -1,0 +1,19 @@
+problem "blocksworld-sussman"
+domain "blocksworld.cdl"
+
+objects:
+  A: block
+  B: block
+  C: block
+
+init:
+  on_table[A] = True
+  on_table[B] = True
+  on[C, A] = True
+  foreach x: block:
+    clear[x] = True
+  clear[A] = False
+  handempty[...] = True
+
+goal:
+  on(B, C) and on(A, B)

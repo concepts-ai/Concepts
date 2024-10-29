@@ -15,8 +15,8 @@ import open3d as o3d
 from dataclasses import dataclass
 from typing import Union, Optional, Tuple
 
-from concepts.simulator.pybullet.rotation_utils import get_quaternion_from_matrix, find_orthogonal_vector
-from concepts.simulator.pybullet.components.robot_base import Robot
+from concepts.math.rotationlib_xyzw import mat2quat, find_orthogonal_vector
+from concepts.simulator.pybullet.components.robot_base import BulletArmRobotBase
 
 
 @dataclass
@@ -38,7 +38,7 @@ class GraspReturn(object):
 class GraspSampler(object):
     """Generate grasps for the input mesh."""
 
-    def __init__(self, robot: Robot, gripper_size: float, gripper_gap: float, reachability_min_bound: Optional[np.ndarray] = None, reachability_max_bound: Optional[np.ndarray] = None):
+    def __init__(self, robot: BulletArmRobotBase, gripper_size: float, gripper_gap: float, reachability_min_bound: Optional[np.ndarray] = None, reachability_max_bound: Optional[np.ndarray] = None):
         """Initialize the grasp generator.
 
         Args:
@@ -124,7 +124,7 @@ class LocalConvexificationGraspSampler(GraspSampler):
     config: LocalConvexificationGraspGeneratorConfig
 
     def __init__(
-        self, robot: Robot,
+        self, robot: BulletArmRobotBase,
         gripper_size: float, gripper_gap: float,
         reachability_min_bound: Optional[np.ndarray] = None, reachability_max_bound: Optional[np.ndarray] = None,
         config: Optional[LocalConvexificationGraspGeneratorConfig] = None,
@@ -216,7 +216,7 @@ class LocalConvexificationGraspSampler(GraspSampler):
 
     def _construct_quat(self, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
         """Construct a quaternion from the new x-y-z coordinate axes of the gripper."""
-        return get_quaternion_from_matrix(np.stack([x, y, z], axis=1))
+        return mat2quat(np.stack([x, y, z], axis=1))
 
     def _check_collision(self, ee_pos, ee_quat) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """Check if the grasping is collision-free."""
@@ -244,9 +244,9 @@ class LocalConvexificationGraspSampler(GraspSampler):
         # self.robot.client.step(1)
         # input('Press enter to continue')
 
-        contacts = self.robot.client.w.get_contact(a=self.robot.get_robot_body_id())
+        contacts = self.robot.client.w.get_contact(a=self.robot.get_body_id())
 
-        all_contact_bodies = {c.body_b for c in contacts} - {self.robot.get_robot_body_id()}
+        all_contact_bodies = {c.body_b for c in contacts} - {self.robot.get_body_id()}
         all_contact_body_names = [self.robot.client.w.body_names[b] for b in all_contact_bodies]
 
         if self.config.debug_vis_return:

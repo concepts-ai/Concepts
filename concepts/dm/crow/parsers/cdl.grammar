@@ -1,0 +1,322 @@
+start: domain_definition
+     | problem_definition
+     | _NEWLINE* domain_definition_item (_NEWLINE | domain_definition_item)*
+     | _NEWLINE* (test) _NEWLINE*
+
+// Domain Definition {{{
+
+domain_definition: _NEWLINE* domain_def (_NEWLINE | domain_definition_item)*
+domain_def: "domain" domain_name
+?domain_name: string
+?domain_definition_item: import_definition
+                       | include_definition
+                       | pragma_definition
+                       | type_definition
+                       | object_constant_definition
+                       | feature_definition
+                       | function_definition
+                       | controller_definition
+                       | behavior_definition
+                       | generator_definition
+                       | undirected_generator_definition
+
+import_definition: "import" string
+include_definition: "include" string
+pragma_definition: _PRAGMA_KEYWORD decorator_kwargs
+                 | _PRAGMA_KEYWORD VARNAME "(" [arguments] ")" -> pragma_definition_with_args
+_PRAGMA_KEYWORD: "#!pragma"
+type_definition  : "typedef" BASIC_TYPENAME ":" typename
+
+object_constant_definition: "object_constant" VARNAME ":" typename
+
+typename: unsized_vector_typename
+        | sized_vector_typename
+        | BASIC_TYPENAME
+        | typename "[" cs_list{typename} "]" -> batched_typename
+        | typename "[" "]" -> list_typename
+
+typed_argument: VARNAME ":" typename
+multi_typed_arguments: cs_list{VARNAME} ":" typename
+in_typed_argument: VARNAME "in" test
+
+unsized_vector_typename: "vector" "[" BASIC_TYPENAME "]"
+sized_vector_typename: "vector" "[" BASIC_TYPENAME "," DEC_NUMBER "]"
+
+feature_definition: "feature" [_LLSQB decorator_kwargs _RRSQB] VARNAME "(" [arguments_def] ")" [_RIGHT_ARROW typename] [":" suite]
+function_definition: "def" [_LLSQB decorator_kwargs _RRSQB] VARNAME "(" [arguments_def] ")" [_RIGHT_ARROW typename] [":" suite]
+controller_definition: "controller" [_LLSQB decorator_kwargs _RRSQB] VARNAME "(" [arguments_def] ")" [":" _NEWLINE _INDENT behavior_effect_definition _DEDENT]
+
+behavior_definition: "behavior" [_LLSQB decorator_kwargs _RRSQB] VARNAME "(" [arguments_def] ")" ":" _NEWLINE _INDENT behavior_definition_parts+ _DEDENT
+?behavior_definition_parts: behavior_goal_definition
+                          | behavior_body_definition
+                          | behavior_effect_definition
+                          | behavior_heuristic_definition
+                          | behavior_minimize_definition
+behavior_goal_definition: "goal" ":" suite
+behavior_body_definition: "body" ":" suite
+behavior_effect_definition: "eff" ":" suite
+behavior_minimize_definition: "minimize" ":" suite
+behavior_heuristic_definition: "heuristic" ":" suite
+
+generator_definition: "generator" [_LLSQB decorator_kwargs _RRSQB] VARNAME "(" [arguments_def] ")" ":" _NEWLINE _INDENT generator_definition_parts+ _DEDENT
+?generator_definition_parts: generator_goal_definition
+                           | generator_in_definition
+                           | generator_out_definition
+
+generator_goal_definition: "goal" ":" suite
+generator_in_definition: "in" ":" cs_list{atom} _NEWLINE
+generator_out_definition: "out" ":" cs_list{atom} _NEWLINE
+
+undirected_generator_definition: "undirected_generator" [_LLSQB decorator_kwargs _RRSQB] VARNAME "(" [arguments_def] ")" ":" _NEWLINE _INDENT undirected_generator_definition_parts+ _DEDENT
+?undirected_generator_definition_parts: generator_goal_definition
+
+// }}}
+
+// Problem Definition {{{
+
+problem_definition: _NEWLINE* problem_def (_NEWLINE | problem_definition_item)*
+problem_def: "problem" problem_name
+?problem_name: string
+?problem_definition_item: domain_def
+                        | objects_definition
+                        | init_definition
+                        | goal_definition
+                        | import_definition
+                        | include_definition
+                        | pragma_definition
+                        | type_definition
+                        | feature_definition
+                        | function_definition
+                        | controller_definition
+                        | behavior_definition
+                        | generator_definition
+                        | undirected_generator_definition
+
+objects_definition: "objects" ":" _NEWLINE _INDENT ((typed_argument | multi_typed_arguments) _NEWLINE)* _DEDENT
+init_definition: "init" ":" suite
+goal_definition: "goal" ":" suite
+
+// }}}
+
+// Statements and suite {{{
+
+suite: simple_stmt | _NEWLINE _INDENT stmt+ _DEDENT
+
+?stmt: simple_stmt
+     | compound_stmt
+     | _LLSQB decorator_kwargs _RRSQB _NEWLINE? compound_stmt -> annotated_compound_stmt
+     | _LLSQB decorator_kwargs _RRSQB _NEWLINE? (achieve_once_stmt | achieve_hold_stmt | pachieve_once_stmt | pachieve_hold_stmt | untrack_stmt | assert_once_stmt | assert_hold_stmt | return_stmt) _NEWLINE? -> annotated_compound_stmt
+?simple_stmt: small_stmt (";" small_stmt)* [";"] _NEWLINE
+?small_stmt: expr_stmt | assign_stmt | pass_stmt
+           | achieve_once_stmt | achieve_hold_stmt | pachieve_once_stmt | pachieve_hold_stmt | untrack_stmt
+           | return_stmt
+           | assert_once_stmt | assert_hold_stmt
+           | commit_stmt
+?compound_stmt: if_stmt | bind_stmt
+              | ordered_suite
+              | foreach_stmt | foreach_in_stmt | while_stmt
+              // | compound_achieve_once_stmt | compound_achieve_hold_stmt | compound_untrack_stmt | compound_assert_once_stmt | compound_assert_hold_stmt | compound_return_stmt
+              // | compound_expr_stmt
+              // | compound_assign_stmt
+
+ordered_suite: ordering_op ":" suite
+!ordering_op: "sequential" | "unordered" | "promotable" | "promotable" "unordered" | "promotable" "sequential" | "preamble" | "critical" | "critical" "unordered" | "critical" "sequential" | "alternative"
+
+expr_stmt: test
+         | test ("," test)+ ","?  -> tuple
+         | test ","  -> tuple
+         | "*" test -> expr_list_expansion_stmt
+assign_stmt: atom _assign_op test
+           | _LLSQB decorator_kwargs _RRSQB _NEWLINE? atom _assign_op test -> annotated_assign_stmt
+           | "let" VARNAME [":" typename] ["=" test] -> let_assign_stmt
+           | "symbol" VARNAME "=" test -> symbol_assign_stmt
+!_assign_op: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
+pass_stmt: "pass"
+commit_stmt: "commit" [_LLSQB decorator_kwargs _RRSQB]
+
+
+if_stmt: "if" test ":" suite ["else" ":" suite]
+foreach_stmt: "foreach" cs_list{typed_argument} ":" suite
+foreach_in_stmt: "foreach" cs_list{VARNAME} "in" cs_list{test} ":" suite
+while_stmt: "while" test ":" suite
+bind_stmt: "bind" cs_list{typed_argument} "where" ":" suite
+         | "bind" cs_list{typed_argument} _NEWLINE -> bind_stmt_no_where
+
+return_stmt: "return" test
+achieve_once_stmt: "achieve_once" cs_list{test}
+achieve_hold_stmt: "achieve" cs_list{test}
+                 | "achieve_hold" cs_list{test}
+pachieve_once_stmt: "pachieve_once" cs_list{test}
+pachieve_hold_stmt: "pachieve" cs_list{test}
+                  | "pachieve_hold" cs_list{test}
+untrack_stmt: "untrack" [cs_list{test}]
+assert_once_stmt: "assert" test
+                | "assert_once" test
+assert_hold_stmt: "assert_hold" test
+
+// compound_expr_stmt: compound_test
+// compound_assign_stmt: atom "=" compound_test
+//                     | "let" VARNAME "=" compound_test -> let_assign_stmt
+//                     | "symbol" VARNAME "=" compound_test -> symbol_assign_stmt
+// compound_achieve_once_stmt: "achieve_once" compound_test
+// compound_achieve_hold_stmt: "achieve" compound_test
+//                           | "achieve_hold" compound_test
+// compound_untrack_stmt: "untrack" compound_test
+// compound_assert_once_stmt: "assert" compound_test
+//                          | "assert_once" compound_test
+// compound_assert_hold_stmt: "assert_hold" compound_test
+// compound_return_stmt: "return" compound_test
+
+// }}}
+
+// Expressions {{{
+
+?compound_test: forall_test
+              | exists_test
+              | forall_in_test
+              | exists_in_test
+              | findall_test
+              | findone_test
+
+forall_test: "forall" cs_list{typed_argument} "where" ":" test
+           | "forall" cs_list{typed_argument} ":" test
+exists_test: "exists" cs_list{typed_argument} "where" ":" test
+           | "exists" cs_list{typed_argument} ":" test
+forall_in_test: "forall" cs_list{in_typed_argument} ":" test
+exists_in_test: "exists" cs_list{in_typed_argument} ":" test
+findall_test: "findall" typed_argument "where" ":" test
+            | "findall" typed_argument ":" test
+findone_test: "findone" typed_argument "where" ":" test
+            | "findone" typed_argument ":" test
+
+?test_nocond: or_test
+?test: or_test
+     | or_test ("if" or_test "else" test) -> cond_test
+     | forall_test | exists_test | forall_in_test | exists_in_test | findall_test | findone_test
+
+?or_test: and_test ("or" and_test)*
+?and_test: not_test_ ("and" not_test_)*
+?not_test_: "not" not_test_ -> not_test
+          | comparison_expr
+?comparison_expr: expr (comp_op expr)*
+?expr: bitor_expr
+?bitor_expr: bitxor_expr ("|" bitxor_expr)*
+?bitxor_expr: bitand_expr ("^" bitand_expr)*
+?bitand_expr: shift_expr ("&" shift_expr)*
+?shift_expr: arith_expr (_shift_op arith_expr)*
+?arith_expr: mul_expr (_add_op mul_expr)*
+?mul_expr: factor (_mul_op factor)*
+?factor: _unary_op factor -> unary_op_expr
+       | power
+?power: atom_expr ("**" factor)?
+
+!_unary_op: "+"|"-"|"~"
+!_add_op: "+"|"-"
+!_shift_op: LSHIFT|RSHIFT
+!_mul_op: "*"|"@"|"/"|"%"|FLOORDIV
+// <> isn't actually a valid comparison operator in Python. It's here for the
+// sake of a __future__ import described in PEP 401 (which really works :-)
+!comp_op: "<"|">"|DOUBLE_EQUAL|GREATER_EQ|LESS_EQ|NOT_EQ
+
+?atom_expr:      VARNAME [ _LLSQB decorator_kwargs _RRSQB ] "(" [arguments] ")" -> atom_expr_funccall
+          | "do" VARNAME [ _LLSQB decorator_kwargs _RRSQB ] "(" [arguments] ")" -> atom_expr_do_funccall
+          | atom
+?atom: number
+     | VARNAME -> atom_varname
+     | VARNAME [ _LLSQB decorator_kwargs _RRSQB ] "[" cs_list{test}"]" -> atom_subscript
+     | "(" _tuple_inner? ")" -> tuple
+     | "[" _list_inner? "]" -> list
+     | "(" test ")"
+     | ELLIPSIS
+     | NONE
+     | TRUE
+     | FALSE
+     | string
+     | ":" -> atom_colon
+
+// }}}
+
+_tuple_inner: test (("," test)+ [","] | ",")
+_list_inner: test [("," test)+ [","]]
+
+arguments_def: typed_argument ("," typed_argument)*
+
+arguments: argvalue ("," argvalue)*  ("," [ starargs | kwargs])?
+         | starargs
+         | kwargs
+
+starargs: stararg ("," stararg)* ("," argvalue)* ["," kwargs]
+stararg: "*" test
+kwargs: "**" test ("," argvalue)*
+
+?argvalue: test ("=" test)?
+
+// Other terminals
+_NEWLINE: ( /\r?\n[\t ]*/ | COMMENT )+
+
+%ignore /[\t \f]+/  // WS
+%ignore /\\[\t \f]*\r?\n/   // LINE_CONT
+%ignore COMMENT
+%declare _INDENT _DEDENT
+
+// Variable name
+%import common.LETTER
+%import common.DIGIT
+VARNAME: ("_" | LETTER) ("_"|LETTER|DIGIT)*
+CONSTNAME: ("_" | LETTER) ("_"|"#"|":"|LETTER|DIGIT)*
+BASIC_TYPENAME: ("_" | LETTER) ("_"|LETTER|DIGIT)*
+
+// literal types
+literal: boolean | number | string | literal_list | literal_set | NONE
+boolean: TRUE | FALSE
+literal_list: "[" "]"
+            | "[" literal ("," literal)* "]"
+literal_set: "{" "}"
+           | "{" literal ("," literal)* "}"
+TRUE: "True"
+FALSE: "False"
+NONE: "None"
+ELLIPSIS: "..."
+
+number: DEC_NUMBER | HEX_NUMBER | BIN_NUMBER | OCT_NUMBER | FLOAT_NUMBER | IMAG_NUMBER
+string: STRING | LONG_STRING
+
+// Python terminals
+COMMENT: /#(?!\!)[^\n]*/
+
+STRING: /([ubf]?r?|r[ubf])("(?!"").*?(?<!\\)(\\\\)*?"|'(?!'').*?(?<!\\)(\\\\)*?')/i
+LONG_STRING: /([ubf]?r?|r[ubf])(""".*?(?<!\\)(\\\\)*?"""|'''.*?(?<!\\)(\\\\)*?''')/is
+
+_SPECIAL_DEC: "0".."9"        ("_"?  "0".."9"                       )*
+DEC_NUMBER:   "1".."9"        ("_"?  "0".."9"                       )*
+          |   "0"             ("_"?  "0"                            )* /(?![1-9])/
+HEX_NUMBER.2: "0" ("x" | "X") ("_"? ("0".."9" | "a".."f" | "A".."F"))+
+OCT_NUMBER.2: "0" ("o" | "O") ("_"?  "0".."7"                       )+
+BIN_NUMBER.2: "0" ("b" | "B") ("_"?  "0".."1"                       )+
+
+_EXP: ("e"|"E") ["+" | "-"] _SPECIAL_DEC
+DECIMAL: "." _SPECIAL_DEC | _SPECIAL_DEC "." _SPECIAL_DEC?
+FLOAT_NUMBER.2: _SPECIAL_DEC _EXP | DECIMAL _EXP?
+IMAG_NUMBER.2: (_SPECIAL_DEC      | FLOAT_NUMBER) ("J" | "j")
+
+_LLSQB: "[["
+_RRSQB: "]]"
+_RIGHT_ARROW: "->"
+
+DOUBLE_EQUAL: "=="
+GREATER_EQ: ">="
+LESS_EQ: "<="
+NOT_EQ: "!="
+FLOORDIV: "//"
+RSHIFT: ">>"
+LSHIFT: "<<"
+
+// decorator
+decorator_kwargs: decorator_kwarg ("," decorator_kwarg)*
+decorator_kwarg: decorator_k "=" decorator_v | decorator_k
+?decorator_k: VARNAME
+?decorator_v: literal
+
+// Comma-separated list (with an optional trailing comma)
+cs_list{item}: item ("," item)* ","?
+_cs_list{item}: item ("," item)* ","?

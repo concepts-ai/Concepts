@@ -10,11 +10,11 @@
 
 import ast
 from typing import Optional, Tuple, Sequence
-from concepts.dsl.dsl_types import TypeBase, ObjectType, BOOL, INT64, Variable
+from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, BOOL, INT64, FLOAT32, Variable
 from concepts.dsl.dsl_functions import Function, FunctionType
 from concepts.dsl.dsl_domain import DSLDomainBase
 from concepts.dsl.expression import ExpressionDefinitionContext, ValueOutputExpression, get_expression_definition_context, get_types
-from concepts.dsl.expression import NotExpression, AndExpression, OrExpression, ForallExpression, ExistsExpression, FunctionApplicationExpression
+from concepts.dsl.expression import ConstantExpression, NotExpression, AndExpression, OrExpression, ForallExpression, ExistsExpression, FunctionApplicationExpression, ObjectCompareExpression, ValueCompareExpression, CompareOpType
 from concepts.dsl.parsers.parser_base import ParserBase
 
 
@@ -122,6 +122,44 @@ class FOLPythonParser(ParserBase):
                 raise NotImplementedError(f'BoolOp {expression.op} is not supported.')
         elif isinstance(expression, ast.Name):
             return ctx[expression.id]
+        elif isinstance(expression, ast.Constant):
+            if isinstance(expression.value, bool):
+                return ConstantExpression(expression.value, BOOL)
+            elif isinstance(expression.value, int):
+                return ConstantExpression(expression.value, INT64)
+            elif isinstance(expression.value, float):
+                return ConstantExpression(expression.value, FLOAT32)
+            else:
+                raise NotImplementedError(f'Constant {expression.value} is not supported.')
+        elif isinstance(expression, ast.Compare):
+            left = self._parse_expression_inner(expression.left)
+            right = self._parse_expression_inner(expression.comparators[0])
+            op = expression.ops[0]
+
+            if isinstance(left.return_type, ObjectType) and isinstance(right.return_type, ObjectType):
+                if isinstance(op, ast.Eq):
+                    return ObjectCompareExpression(CompareOpType.EQ, left, right)
+                elif isinstance(op, ast.NotEq):
+                    return ObjectCompareExpression(CompareOpType.NEQ, left, right)
+                else:
+                    raise NotImplementedError(f'Compare {op} is not supported.')
+            elif isinstance(left.return_type, ValueType) and isinstance(right.return_type, ValueType):
+                if isinstance(op, ast.Eq):
+                    return ValueCompareExpression(CompareOpType.EQ, left, right)
+                elif isinstance(op, ast.NotEq):
+                    return ValueCompareExpression(CompareOpType.NEQ, left, right)
+                elif isinstance(op, ast.Lt):
+                    return ValueCompareExpression(CompareOpType.LT, left, right)
+                elif isinstance(op, ast.LtE):
+                    return ValueCompareExpression(CompareOpType.LEQ, left, right)
+                elif isinstance(op, ast.Gt):
+                    return ValueCompareExpression(CompareOpType.GT, left, right)
+                elif isinstance(op, ast.GtE):
+                    return ValueCompareExpression(CompareOpType.GEQ, left, right)
+                else:
+                    raise NotImplementedError(f'Compare {op} is not supported.')
+            else:
+                raise ValueError(f'Cannot compare {left.return_type} with {right.return_type}.')
         else:
             raise NotImplementedError(f'Expression {expression} is not supported. Full expression: {ast.dump(expression)}.')
 

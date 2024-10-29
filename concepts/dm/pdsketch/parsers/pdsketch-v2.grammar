@@ -1,0 +1,241 @@
+start: definition | expr | supp_definitions
+definition: "(" "define" definition_decl supp_definitions ")"
+
+definition_decl: "(" definition_type definition_name ")"
+?definition_type: VARNAME
+?definition_name: VARNAME
+
+supp_definitions: supp_definition* supp_definition
+?supp_definition: extends_definition
+               | pragma_definition
+               | requirements_definition
+               | types_definition
+               | constants_definition
+               | predicates_definition
+               | predicate_group_definition
+               | action_definition
+               | action_definition2
+               | regression_definition
+               | axiom_definition
+               | macro_definition
+               | extended_macro_definition
+               | derived_definition
+               | generator_definition
+               | fancy_generator_definition
+               | problem_domain_definition
+               | objects_definition
+               | init_definition
+               | goal_definition
+               | csp_domain_definition
+               | variables_definition
+               | constraints_definition
+
+domain_name: VARNAME
+
+// extends
+extends_definition: "(" ":" "extends" string ")"
+
+// pragma
+pragma_definition: "(" ":" "pragma" decorator_kwargs ")"
+
+// requirements
+requirements_definition: "(" ":" "requirements" requirement_name+ ")"
+requirement_name: ":" VARNAME
+
+// types
+types_definition: "(" ":" "types" type_definition+ ")"
+type_definition: object_type_name+ "-" parent_type_name | object_type_name+
+parent_type_name: object_type_name | value_type_name
+
+// constants
+constants_definition: "(" ":" "constants" allconstant+ ")"
+
+// predicates
+predicates_definition: "(" ":" "predicates" (predicate_definition|predicate_definition2)+ ")"
+predicate_definition: "(" predicate_name allvariable* ")"
+predicate_definition2: "(" predicate_name allvariable* "->" value_type_name_unwrapped  ")"
+predicate_name: CONSTNAME ("[" decorator_kwargs "]")?
+
+// derived_definition
+derived_definition: "(" ":" "derived" (derived_signature1|derived_signature2) expr_function_call ")"
+derived_signature1: "(" derived_name allvariable* ")"
+derived_signature2: "(" derived_name allvariable* "->" value_type_name_unwrapped  ")"
+derived_name: CONSTNAME ("[" decorator_kwargs "]")?
+
+// predicate group
+predicate_group_definition: "(" ":" "predicate-group" predicate_group_name predicate_name* ")"
+predicate_group_name: VARNAME
+
+// actions
+action_definition:  "(" ":" "action" action_name action_parameters? action_precondition? action_effect? action_controller? ")"
+action_definition2: "(" ":" "action" action_name action_extends action_parameters? action_precondition? action_effect? action_controller? ")"
+action_name: VARNAME ("[" decorator_kwargs "]")?
+action_parameters: ":" "parameters" "(" allvariable* ")"
+action_precondition: ":" "precondition" expr_function_call
+action_effect: ":" "effect" expr_function_call
+action_controller: ":" "controller" expr_function_call
+?action_extends: ":" "extends" VARNAME
+
+// axioms
+axiom_definition: "(" ":" "axiom" axiom_decorator axiom_vars axiom_context axiom_implies ")"
+axiom_decorator: ("[" decorator_kwargs "]")?
+axiom_vars: (":" "vars" "(" allvariable* ")")?
+axiom_context: ":" "context" expr_function_call
+axiom_implies: ":" "implies" expr_function_call
+
+// macros
+macro_definition: "(" ":" "macro" macro_signature macro_content ")"
+macro_signature: "(" macro_name allvariable* ")"
+macro_content: "(" "then" simple_function_call+ ")"
+macro_name: CONSTNAME ("[" decorator_kwargs "]")?
+
+// extended macros
+extended_macro_definition: "(" ":" "extended-macro" extended_macro_name extended_macro_parameters extended_macro_precondition? extended_macro_effect? extended_macro_body ")"
+extended_macro_name: VARNAME ("[" decorator_kwargs "]")?
+extended_macro_parameters: ":" "parameters" "(" allvariable* ")"
+extended_macro_precondition: ":" "precondition" expr_function_call
+extended_macro_effect: ":" "effect" expr_function_call
+extended_macro_body: ":" "body" "(" "then" expr_function_call+ ")"
+
+// regression
+regression_definition: "(" ":" "regression" regression_name regression_parameters? regression_precondition? regression_goal regression_side_effect? regression_body ")"
+                     | "(" ":" "regression" regression_name regression_parameters? regression_goal regression_precondition? regression_side_effect? regression_body ")"
+regression_name: VARNAME ("[" decorator_kwargs "]")?
+regression_parameters: ":" "parameters" "(" (allvariable | quantifiedvariable)* ")"
+regression_precondition: ":" "precondition" expr_function_call
+regression_goal: ":" "goal" expr_function_call
+regression_side_effect: ":" "side-effect" expr_function_call
+regression_body: ":" "rule" "(" "then" (expr_function_call | cspcommitflag)* ")"
+               | ":" "body" "(" "then" (expr_function_call | cspcommitflag)* ")"
+
+// generator definition
+generator_definition: "(" ":" "generator" generator_name generator_parameters generator_certifies generator_context generator_generates ")"
+generator_name: VARNAME ("[" decorator_kwargs "]")?
+generator_parameters: ":" "parameters" "(" allvariable* ")"
+generator_certifies: ":" "certifies" expr_function_call
+generator_context: ":" "context" expr_function_call
+generator_generates: ":" "generates" expr_function_call
+
+// fancy generator definition
+fancy_generator_definition: "(" ":" "generator" generator_name generator_parameters generator_certifies ")"
+                          | "(" ":" "fancy-generator" generator_name generator_parameters generator_certifies ")"
+
+// problem domain
+problem_domain_definition: "(" ":" "domain" domain_name ")"
+
+// objects
+objects_definition: "(" ":" "objects" allconstant* ")"
+
+// init
+init_definition: "(" ":" "init" init_definition_item* ")"
+init_definition_item: simple_function_call
+
+// goal
+goal_definition: "(" ":" "goal" expr_function_call ")"
+
+// csp problem domain
+csp_domain_definition: "(" ":" "domain" domain_name ")"
+
+// variables
+variables_definition: "(" ":" "variables" allvariable* ")"
+
+// constraints
+constraints_definition: "(" ":" "constraints" expr ")"
+
+// variables and constants
+VARIABLE: "?" VARNAME | "??"
+variable: VARIABLE
+CONSTANT: CONSTNAME
+constant: CONSTANT
+typedvariable: variable "-" object_type_name_unwrapped
+typedconstant: constant "-" object_type_name_unwrapped
+
+?allconstant: constant | typedconstant
+?allvariable: variable | typedvariable
+quantifiedvariable: "(" (EXISTS|FORALL) typedvariable ")"
+
+// slots
+slot: SLOT slot_name ("[" decorator_kwargs "]")?
+slot_name: VARNAME
+SLOT: "??"
+
+// variable name
+%import common.LETTER
+%import common.DIGIT
+VARNAME: ("_" | LETTER) ("_"|"-"|LETTER|DIGIT)*
+CONSTNAME: ("_" | LETTER) ("_"|"-"|"#"|":"|LETTER|DIGIT)*
+
+// type name
+type_name: VARNAME
+object_type_name: type_name | list_object_type_name
+value_type_name: type_name | vector_type_name | list_value_type_name
+list_object_type_name: "list" "[" object_type_name "]"
+list_value_type_name: "list" "[" value_type_name "]"
+vector_type_name: "vector" "[" value_type_name "," vector_type_size vector_type_choices ("," decorator_kwargs)? "]"
+vector_type_choices: ("," vector_type_size)?
+?vector_type_size: int
+
+object_type_name_unwrapped: object_type_name
+value_type_name_unwrapped: value_type_name
+
+// decorators
+decorator_kwargs: decorator_kwarg ("," decorator_kwarg)*
+decorator_kwarg: decorator_k "=" decorator_v | decorator_k
+decorator_k: VARNAME
+decorator_v: literal | value_type_name_unwrapped
+
+// literal types
+?literal: bool | number | string | list
+TRUE: "true"
+FALSE: "false"
+bool: TRUE | FALSE
+%import common.INT
+int: INT
+%import common.SIGNED_NUMBER
+float: SIGNED_NUMBER
+?number: int | float
+%import common.ESCAPED_STRING
+string: ESCAPED_STRING
+list: "[" "]"
+    | "[" literal ("," literal)* "]"
+    | "{" literal ("," literal)* "}"
+cspcommitflag: "!" ("[" decorator_kwargs "]")?
+
+// expression
+?expr_function_call: annotated_function_call | function_call | quantified_function_call | conditional_function_call | pm_function_call | list_expansion
+?expr: variable | constant | expr_function_call | list_construction
+
+list_construction: "{" expr* "}"
+list_expansion: ellipsis expr
+function_call: "(" (function_name|method_name) expr* ellipsis? ")"
+simple_function_call: "(" (function_name|method_name) " " (variable | constant)* ellipsis? ")"
+function_name: VARNAME ("[" decorator_kwargs "]")? | slot
+method_name: VARNAME SCOPE_SEP VARNAME
+SCOPE_SEP: "::"
+ellipsis: "..."
+
+EXISTS: "exists"
+FORALL: "forall"
+IOTA: "iota"
+FOREACH: "foreach"
+FIND: "find"
+?quantifier: EXISTS | FORALL | IOTA | FOREACH | FIND
+quantifier_name: quantifier ("[" decorator_kwargs "]")?
+quantified_function_call: "(" quantifier_name "(" typedvariable+ ")" expr ")"
+conditional_function_call: "(" "cond" expr+ ")"
+
+PLUS: "+"
+MINUS: "-"
+?pm_function_call_sign: PLUS | MINUS
+pm_function_call: pm_function_call_sign simple_function_call
+
+annotated_function_call: function_annotation (function_call | quantified_function_call | conditional_function_call)
+function_annotation: "[[" decorator_kwargs "]]"
+
+%import common.WS
+%ignore WS
+
+%import common.NEWLINE
+COMMENT: ";" /(.)*/ NEWLINE
+//       | "#" /(.)+/ NEWLINE
+%ignore COMMENT

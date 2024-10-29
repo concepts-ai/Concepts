@@ -15,14 +15,15 @@ Semantically, this dictionary represents the state of the system (e.g., a scene,
 
 from jacinle.utils.printing import indent_text
 from dataclasses import dataclass
-from typing import Any, Optional, Union, Iterable, Tuple, List, Mapping, Dict
+from typing import Any, Optional, Union, Iterable, Sequence, Tuple, List, Mapping, Dict
 
-from concepts.dsl.dsl_types import ObjectType, AutoType
+from concepts.dsl.dsl_types import ObjectType, AutoType, ListType, QINDEX, get_format_context
 from concepts.dsl.tensor_value import TensorValue, concat_tvalues
+from concepts.dsl.value import ListValue
 
 
 __all__ = [
-    'StateObjectReference',
+    'StateObjectReference', 'StateObjectList', 'StateObjectDistribution',
     'MultidimensionalArrayInterface', 'TensorValueDict',
     'TensorStateBase',
     'NamedObjectStateMixin', 'TensorState', 'NamedObjectTensorState',
@@ -40,6 +41,91 @@ class StateObjectReference(object):
 
     name: str
     index: int
+    dtype: Optional[ObjectType] = None
+
+    def clone(self, dtype: Optional[ObjectType] = None) -> 'StateObjectReference':
+        return StateObjectReference(self.name, self.index, dtype or self.dtype)
+
+
+class StateObjectList(ListValue):
+    def __init__(self, dtype: ListType, values: Union[Sequence[StateObjectReference], slice]):
+        if isinstance(values, slice):
+            assert values is QINDEX, 'Only QINDEX is allowed for the values of StateObjectList.'
+            super().__init__(dtype, tuple())
+            self.values = QINDEX
+        else:
+            super().__init__(dtype, values)
+
+    dtype: ListType
+
+    values: Union[Tuple[StateObjectReference, ...], slice]
+
+    @property
+    def element_type(self) -> ObjectType:
+        return self.dtype.element_type
+
+    @property
+    def is_qindex(self) -> bool:
+        return self.values == QINDEX
+
+    @property
+    def array_accessor(self) -> Union[Sequence[int], slice]:
+        if isinstance(self.values, slice):
+            return self.values
+        return [v.index for v in self.values]
+
+    def clone(self, dtype: Optional[ListType] = None) -> 'StateObjectList':
+        if dtype is None:
+            return StateObjectList(self.dtype, self.values)
+
+        assert isinstance(dtype, ListType) or dtype is None, 'dtype should be a ListType.'
+        if self.is_qindex:
+            return StateObjectList(dtype, QINDEX)
+        return StateObjectList(dtype, tuple(v.clone(dtype.element_type) for v in self.values))
+
+    def __str__(self):
+        if self.values == QINDEX:
+            elements_str = 'QINDEX'
+        else:
+            elements_str = ', '.join(str(v.name) for v in self.values)
+        if get_format_context().object_format_type:
+            return f'LV({{{elements_str}}}, dtype={self.dtype})'
+        else:
+            return f'{{{elements_str}}}'
+
+    def __repr__(self):
+        if self.values == QINDEX:
+            return f'LV(QINDEX, dtype={self.dtype})'
+        elements_str = ', '.join(str(v.name) for v in self.values)
+        return f'LV({{{elements_str}}}, dtype={self.dtype})'
+
+
+class StateObjectDistribution(StateObjectList):
+    def __init__(self, dtype: ListType, values: Union[Sequence[StateObjectReference], slice], distribution: Any):
+        super().__init__(dtype, values)
+        self.distribution = distribution
+
+    dtype: ListType
+
+    values: Union[Tuple[StateObjectReference, ...], slice]
+
+    distribution: Any
+    """A distribution of the objects. Since it's a distribution over a list, the distribution is a list of probabilities, which can be represented as a numpy array, a list, etc."""
+
+    @property
+    def element_type(self) -> ObjectType:
+        return self.dtype.element_type
+
+    def __str__(self):
+        elements_str = ', '.join(str(v.name) for v in self.values)
+        if get_format_context().object_format_type:
+            return f'LV({{{elements_str}}}, dtype={self.dtype}, distribution={self.distribution})'
+        else:
+            return f'{{{elements_str}, distribution={self.distribution}}}'
+
+    def __repr__(self):
+        elements_str = ', '.join(str(v.name) for v in self.values)
+        return f'LV({{{elements_str}}}, dtype={self.dtype}, distribution={self.distribution})'
 
 
 class MultidimensionalArrayInterface(object):
@@ -189,11 +275,7 @@ class NamedObjectStateMixin(object):
         """The number of objects in the current state."""
         return len(self.object_types)
 
-    def get_typename(self, name: str) -> str:
-        """Get the typename of the object with the given name."""
-        return self.object_name2defaultindex[name][0]
-
-    def get_typed_index(self, name, typename: Optional[str] = None) -> int:
+    def get_typed_index(self, name: str, typename: Optional[str] = None) -> int:
         """Get the typed index of the object with the given name.
         There is an additional typename argument to specify the type of the object.
         Because the same object can have multiple types (due to inheritence), the object can have multiple typed indices, one for each type.
@@ -210,9 +292,50 @@ class NamedObjectStateMixin(object):
             return self.object_name2defaultindex[name][1]
         return self.object_name2index[name, typename]
 
+    def get_default_typename(self, name: str) -> str:
+        """Get the typename of the object with the given name."""
+        return self.object_name2defaultindex[name][0]
+
+    def get_name(self, typename: str, index: int) -> str:
+        """Get the name of the object with the given type and index."""
+        return self.object_type2name[typename][index]
+
+    def get_objects_by_type(self, typename: str) -> List[str]:
+        """Get the names of the objects with the given type."""
+        return self.object_type2name[typename]
+
     def get_nr_objects_by_type(self, typename: str) -> int:
         """Get the number of objects with the given type."""
         return len(self.object_type2name[typename])
+
+    def get_state_object_reference(self, dtype: Union[ObjectType, str], index: Optional[int] = None, name: Optional[str] = None) -> StateObjectReference:
+        """Get the object reference with the given type and index."""
+        if isinstance(dtype, str):
+            dtype, typename = ObjectType(dtype), dtype
+        else:
+            typename = dtype.typename
+
+        if index is not None:
+            return StateObjectReference(self.get_name(typename, index), index, dtype)
+        if name is not None:
+            return StateObjectReference(name, self.get_typed_index(name, typename), dtype)
+        raise ValueError('Either indices or names should be specified.')
+
+    def get_state_object_list(self, dtype: Union[ObjectType, str], indices: Optional[Union[Sequence[int], slice]] = None, names: Optional[Sequence[str]] = None) -> StateObjectList:
+        """Get a list of object references with the given type and indices."""
+        if isinstance(dtype, str):
+            dtype, typename = ObjectType(dtype), dtype
+        else:
+            typename = dtype.typename
+        if indices is not None:
+            if isinstance(indices, slice):
+                if indices != QINDEX:
+                    raise ValueError('Only QINDEX is allowed for the indices of StateObjectList.')
+                return StateObjectList(ListType(dtype), QINDEX)
+            return StateObjectList(ListType(dtype), [self.get_state_object_reference(typename, index) for index in indices])
+        if names is not None:
+            return StateObjectList(ListType(dtype), [self.get_state_object_reference(typename, name=name) for name in names])
+        raise ValueError('Either indices or names should be specified.')
 
 
 class TensorState(TensorStateBase):

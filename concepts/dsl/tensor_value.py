@@ -12,7 +12,7 @@
 
 from dataclasses import dataclass
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Optional, Union, Tuple, Iterable, Sequence, List
+from typing import TYPE_CHECKING, Any, Optional, Union, Tuple, Iterable, Iterator, Sequence, List
 
 import warnings
 import numpy as np
@@ -21,7 +21,7 @@ import torch.nn.functional as F
 import jactorch
 from jacinle.utils.printing import indent_text
 
-from concepts.dsl.dsl_types import TensorValueTypeBase, BOOL, INT64, FLOAT32, NamedTensorValueType, ScalarValueType, VectorValueType, PyObjValueType, QINDEX
+from concepts.dsl.dsl_types import TensorValueTypeBase, BOOL, INT64, FLOAT32, NamedTensorValueType, ScalarValueType, VectorValueType, PyObjValueType, BatchedListType, QINDEX
 from concepts.dsl.value import ValueBase
 
 if TYPE_CHECKING:
@@ -70,6 +70,15 @@ class TensorizedPyObjValues(object):
         #     value = value[i]
         # return value
         return self.values[arguments]
+
+    def fast_set_index(self, arguments: Tuple[int, ...], value):
+        self.values[arguments] = value
+
+    def __getitem__(self, item):
+        return TensorizedPyObjValues(self.dtype, self.values[item])
+
+    def __setitem__(self, key, value: 'TensorizedPyObjValues'):
+        self.values[key] = value.values
 
     def _infer_shape(self):
         """Infer the shape of the values by recursively checking the first element."""
@@ -126,6 +135,9 @@ class TensorizedPyObjValues(object):
     def expand(self, target_size: Tuple[int, ...]):
         return type(self)(self.dtype, np.broadcast_to(self.values, target_size), target_size)
 
+    def unsqueeze(self, dim: int):
+        return type(self)(self.dtype, np.expand_dims(self.values, dim), (1, ) + self.shape)
+
     def __str__(self):
         if self.values.ndim == 0:
             return str(self.values.item())
@@ -163,12 +175,19 @@ class MaskedTensorStorage(object):
     """The quantized values for the tensor. -1 for non-quantized values."""
 
 
+def _canonize_batch_variables(batch_variables: Union[Iterable[str], int]) -> Tuple[str, ...]:
+    if isinstance(batch_variables, int):
+        batch_variables = tuple([f'#{i}' for i in range(batch_variables)])
+    assert all(isinstance(v, str) for v in batch_variables), 'All batch variables should be strings.'
+    return tuple(batch_variables)
+
+
 class TensorValue(ValueBase):
     """A value object with an internal :class:`torch.Tensor` storage."""
 
     def __init__(
         self,
-        dtype: Union[TensorValueTypeBase, PyObjValueType],
+        dtype: Union[TensorValueTypeBase, PyObjValueType, BatchedListType],
         batch_variables: Union[Iterable[str], int],
         tensor: Union[torch.Tensor, TensorizedPyObjValues, MaskedTensorStorage],
         batch_dims: int = 0,
@@ -198,9 +217,7 @@ class TensorValue(ValueBase):
         """
         super().__init__(dtype)
 
-        if isinstance(batch_variables, int):
-            batch_variables = tuple([f'?#{i}' for i in range(batch_variables)])
-        self.batch_variables = tuple(batch_variables)
+        self.batch_variables = _canonize_batch_variables(batch_variables)
         self.batch_dims = batch_dims
 
         self.tensor_mask = None
@@ -238,7 +255,7 @@ class TensorValue(ValueBase):
         self._backward_args = tuple()
         self.tensor_grad = None
 
-    dtype: Union[TensorValueTypeBase, PyObjValueType]
+    dtype: Union[TensorValueTypeBase, PyObjValueType, BatchedListType]
     """The data type of the Value object."""
 
     batch_variables: Tuple[str, ...]
@@ -293,17 +310,19 @@ class TensorValue(ValueBase):
             return MaskedTensorStorage(_maybe_clone_tensor(self.tensor), _maybe_clone_tensor(self.tensor_mask), _maybe_clone_tensor(self.tensor_optimistic_values), _maybe_clone_tensor(self.tensor_quantized_values))
         return MaskedTensorStorage(self.tensor, self.tensor_mask, self.tensor_optimistic_values, self.tensor_quantized_values)
 
-    def clone(self, clone_tensor=True):
+    def clone(self, clone_tensor=True, dtype: Optional[Union[TensorValueTypeBase, PyObjValueType, BatchedListType]] = None) -> 'TensorValue':
         storage = self.to_masked_tensor_storage(clone_tensor=clone_tensor)
         return type(self)(
-            self.dtype, self.batch_variables, storage, self.batch_dims,
+            dtype if dtype is not None else self.dtype, self.batch_variables, storage, self.batch_dims,
             _check_tensor=False, _mask_certified_flag=self._mask_certified_flag
         )
 
-    def rename_batch_variables(self, new_variables: Sequence[str], clone: bool = False):
-        assert len(self.batch_variables) == len(new_variables)
+    def rename_batch_variables(self, new_variables: Sequence[str], dtype: Optional[Union[TensorValueTypeBase, PyObjValueType, BatchedListType]] = None, force: bool = False, clone: bool = False):
+        if not force:
+            assert len(self.batch_variables) == len(new_variables)
         rv = self.clone() if clone else self
-        rv.batch_variables = tuple(new_variables)
+        rv.dtype = dtype if dtype is not None else self.dtype
+        rv.batch_variables = _canonize_batch_variables(new_variables)
         return rv
 
     def init_tensor_optimistic_values(self):
@@ -316,7 +335,7 @@ class TensorValue(ValueBase):
     # Simple creation.
 
     @classmethod
-    def from_tensor(cls, value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[Iterable[str]] = None, batch_dims: int = 0) -> 'TensorValue':
+    def from_tensor(cls, value: torch.Tensor, dtype: Optional[Union[TensorValueTypeBase, BatchedListType]] = None, batch_variables: Optional[Iterable[str]] = None, batch_dims: int = 0) -> 'TensorValue':
         return from_tensor(value, dtype, batch_variables, batch_dims)
 
     @classmethod
@@ -332,7 +351,7 @@ class TensorValue(ValueBase):
         return scalar(value, dtype=dtype)
 
     @classmethod
-    def make_empty(cls, dtype: Union[TensorValueTypeBase, PyObjValueType], batch_variables: Iterable[str] = tuple(), batch_sizes: Iterable[int] = tuple(), batch_dims: int = 0):
+    def make_empty(cls, dtype: Union[TensorValueTypeBase, PyObjValueType, BatchedListType], batch_variables: Iterable[str] = tuple(), batch_sizes: Iterable[int] = tuple(), batch_dims: int = 0):
         if isinstance(dtype, TensorValueTypeBase):
             tensor = torch.zeros(tuple(batch_sizes) + dtype.size_tuple(), dtype=dtype.tensor_dtype())
         else:
@@ -406,6 +425,19 @@ class TensorValue(ValueBase):
             return TensorValue.from_scalar(self.tensor[arguments], self.dtype)
         return self.tensor[arguments]
 
+    def fast_set_index(self, arguments: Tuple[int, ...], value: Union[torch.Tensor, Any, 'OptimisticValue']):
+        from .constraint import OptimisticValue
+        if isinstance(value, OptimisticValue):
+            value = value.identifier
+            self.init_tensor_optimistic_values()
+            self.tensor_optimistic_values[arguments] = value
+            return
+
+        if self.is_tensorized_pyobj:
+            self.tensor.fast_set_index(arguments, value)
+        else:
+            self.tensor[arguments] = value
+
     def __bool__(self):
         if self.dtype == BOOL:
             return bool(self.item())
@@ -425,6 +457,20 @@ class TensorValue(ValueBase):
             return set_index_tvalue(self, key, value)
         else:
             return set_index_pyobj_value(self, key, value)
+
+    def iter_batched_indexing(self, dim: int = 0) -> Iterator['TensorValue']:
+        """Iterate over one of the batch dimensions."""
+        assert isinstance(self.dtype, BatchedListType)
+        assert 0 <= dim < self.dtype.ndim()
+
+        new_dtype = self.dtype.iter_element_type()
+        index_target = self.batch_variables.index(f'@{dim}')
+        indices = [slice(None) for _ in range(self.total_batch_dims)]
+        for i in range(self.get_variable_size(index_target)):
+            indices[dim] = i
+            this_rv = self.index(tuple(indices))
+            this_rv.dtype = new_dtype
+            yield this_rv
 
     def __getitem__(self, item) -> 'TensorValue':
         return self.index(item)
@@ -520,7 +566,7 @@ class TensorValue(ValueBase):
             return
         try:
             if isinstance(self.dtype, NamedTensorValueType):
-                dtype = self.dtype.base_type
+                dtype = self.dtype.parent_type
             else:
                 dtype = self.dtype
 
@@ -580,17 +626,17 @@ def _maybe_clone_tensor(tensor: Optional[Union[torch.Tensor, TensorizedPyObjValu
     return tensor if tensor is None else tensor.clone()
 
 
-def from_tensor(value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[List[str]] = None, batch_dims: int = 0) -> TensorValue:
+def from_tensor(value: torch.Tensor, dtype: Optional[Union[TensorValueTypeBase, BatchedListType]] = None, batch_variables: Optional[List[str]] = None, batch_dims: int = 0) -> TensorValue:
     if dtype is None:
         dtype = TensorValueTypeBase.from_tensor(value)
     if batch_variables is None:
-        batch_variables = list()
+        batch_variables = list() if not isinstance(dtype, BatchedListType) else [f'@{i}' for i in range(dtype.ndim())]
     return TensorValue(dtype, batch_variables, value, batch_dims=batch_dims)
 
 
 def from_tensorized_pyobj(value: TensorizedPyObjValues, dtype: Optional[PyObjValueType] = None, batch_variables: Optional[List[str]] = None, batch_dims: int = 0) -> TensorValue:
     if dtype is None:
-        dtype = PyObjValueType(value.dtype.pyobj_type, value.dtype.shape)
+        dtype = PyObjValueType(value.dtype.pyobj_type, value.dtype.typename)
     if batch_variables is None:
         batch_variables = len(value.shape)
     return TensorValue(dtype, batch_variables, value, batch_dims=batch_dims)
@@ -604,7 +650,7 @@ def vector_values(*args: Any, dtype: Optional[TensorValueTypeBase] = None) -> Te
     return TensorValue(dtype, [], torch.tensor(args, dtype=tensor_dtype))
 
 
-def scalar(value: Union[TensorValue, torch.Tensor, bool, float, int, Any], dtype: Optional[Union[TensorValueTypeBase, PyObjValueType]] = None) -> TensorValue:
+def scalar(value: Union[TensorValue, torch.Tensor, bool, float, int, str, Any], dtype: Optional[Union[TensorValueTypeBase, PyObjValueType]] = None) -> TensorValue:
     if isinstance(value, TensorValue):
         return value
 
@@ -627,7 +673,7 @@ def scalar(value: Union[TensorValue, torch.Tensor, bool, float, int, Any], dtype
     return TensorValue(dtype, [], torch.tensor(value, dtype=tensor_dtype))
 
 
-def t(value: torch.Tensor, dtype: Optional[TensorValueTypeBase] = None, batch_variables: Optional[List[str]] = None) -> TensorValue:
+def t(value: torch.Tensor, dtype: Optional[Union[TensorValueTypeBase, BatchedListType]] = None, batch_variables: Optional[List[str]] = None) -> TensorValue:
     """Alias for :func:`from_tensor`."""
     return from_tensor(value, dtype, batch_variables)
 
@@ -741,6 +787,8 @@ def index_tvalue(value: TensorValue, indices: ValueIndexType) -> TensorValue:
     if indices is None:
         return value.clone()
 
+    if len(indices) < value.nr_variables:
+        indices = indices + (slice(None), ) * (value.nr_variables - len(indices))
     assert len(indices) == value.nr_variables
     batch_variables = list()
     for i, idx in enumerate(indices):
@@ -795,17 +843,17 @@ def set_index_tvalue(lhs: TensorValue, indices: ValueIndexType, rhs: ValueSetInd
             # We have to this cloning. Consider the following case:
             # v[0] = v[1]
             indices = indices[0] if len(indices) == 1 else indices
-
-            lhs.tensor = lhs.tensor.clone()
-            lhs.tensor[indices] = rhs
-            if optimistic_values is not None:
-                lhs.init_tensor_optimistic_values()
-                lhs.tensor_optimistic_values = lhs.tensor_optimistic_values.clone()
-                lhs.tensor_optimistic_values[indices] = optimistic_values
-            if lhs.tensor_quantized_values is not None:
-                assert quantized_values is not None
-                lhs.tensor_quantized_values = lhs.tensor_quantized_values.clone()
-                lhs.tensor_quantized_values[indices] = quantized_values
+            if not isinstance(indices, tuple) or not any((isinstance(x, (tuple, list)) and len(x) == 0) for x in indices):
+                lhs.tensor = lhs.tensor.clone()
+                lhs.tensor[indices] = rhs
+                if optimistic_values is not None:
+                    lhs.init_tensor_optimistic_values()
+                    lhs.tensor_optimistic_values = lhs.tensor_optimistic_values.clone()
+                    lhs.tensor_optimistic_values[indices] = optimistic_values
+                if lhs.tensor_quantized_values is not None:
+                    assert quantized_values is not None
+                    lhs.tensor_quantized_values = lhs.tensor_quantized_values.clone()
+                    lhs.tensor_quantized_values[indices] = quantized_values
     else:
         raise NotImplementedError('Unsupported batched dims: {}.'.format(lhs.batch_dims))
 
@@ -875,6 +923,8 @@ def set_index_pyobj_value(lhs: TensorValue, indices: ValueIndexType, rhs: ValueS
 
 
 def _recursive_set_index_pyobj_value(np_array, indices: Tuple[Union[int, slice], ...], rhs, is_scalar_rhs):
+    if isinstance(rhs, TensorValue):
+        rhs = rhs.tensor.values
     np_array[indices] = rhs
 
     # if len(indices) == 1:
@@ -965,7 +1015,7 @@ def expand_tvalue(value: TensorValue, batch_variables: Iterable[str], batch_size
 
 
 def expand_pyobj_value(value: TensorValue, batch_variables: Iterable[str], batch_sizes: Iterable[int]) -> TensorValue:
-    pass
+    raise NotImplementedError('expand_pyobj_value is not implemented yet.')
 
 
 def is_tvalue_simple_quantizable(value: TensorValue) -> bool:
@@ -1000,9 +1050,9 @@ def simple_quantize_tvalue(value: TensorValue) -> TensorValue:
         rv = (value.tensor > 0.5).to(torch.int64)
     elif value.dtype == INT64:
         rv = value.tensor.to(torch.int64)
-    elif isinstance(value.dtype, NamedTensorValueType) and value.dtype.base_type == BOOL:
+    elif isinstance(value.dtype, NamedTensorValueType) and value.dtype.parent_type == BOOL:
         rv = (value.tensor > 0.5).to(torch.int64)
-    elif isinstance(value.dtype, NamedTensorValueType) and value.dtype.base_type == INT64:
+    elif isinstance(value.dtype, NamedTensorValueType) and value.dtype.parent_type == INT64:
         rv = value.tensor.to(torch.int64)
     else:
         raise TypeError('Unable to quantize value. Need either tensor_indices, or intrinsically quantized dtypes: {}.'.format(str(value)))

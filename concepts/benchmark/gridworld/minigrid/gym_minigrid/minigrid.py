@@ -5,20 +5,22 @@
 # Email  : ezzluo@mit.edu, jiayuanm@mit.edu
 # Date   : 04/23/2021
 #
-# This file is part of HACL-PyTorch.
+# This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
 r"""
 Original file from Chevalier-Boisvert, Maxime and Willems, Lucas and Pal, Suman.
 
-@misc{gym_minigrid,
-  author = {Chevalier-Boisvert, Maxime and Willems, Lucas and Pal, Suman},
-  title = {Minimalistic Gridworld Environment for OpenAI Gym},
-  year = {2018},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/maximecb/gym-minigrid}},
-}
+.. code-block:: bibtex
+
+    @misc{gym_minigrid,
+      author = {Chevalier-Boisvert, Maxime and Willems, Lucas and Pal, Suman},
+      title = {Minimalistic Gridworld Environment for OpenAI Gym},
+      year = {2018},
+      publisher = {GitHub},
+      journal = {GitHub repository},
+      howpublished = {\url{https://github.com/maximecb/gym-minigrid}},
+    }
 """
 
 import hashlib
@@ -647,9 +649,7 @@ class Grid:
 
 
 class MiniGridEnv(gym.Env):
-    """
-    2D grid world game environment
-    """
+    """A 2D grid world game environment."""
 
     metadata = {'render.modes': ['human', 'rgb_array'], 'video.frames_per_second': 10}
 
@@ -736,6 +736,12 @@ class MiniGridEnv(gym.Env):
         self.seed(seed=seed)
         # Initialize the state
         # self.reset()
+
+    action_space: spaces.Discrete
+    """The action space for the environment. It always has 6 discrete actions"""
+
+    observation_space: spaces.Box
+    """The observation space for the environment. It is a Box of shape (agent_view_size, agent_view_size, 3)"""
 
     def reset(self):
         # Current position and direction of the agent
@@ -1127,6 +1133,8 @@ class MiniGridEnv(gym.Env):
         return obs_cell is not None and obs_cell.type == world_cell.type
 
     def step(self, action):
+        """The agent performs an action."""
+
         self.step_count += 1
 
         reward = 0

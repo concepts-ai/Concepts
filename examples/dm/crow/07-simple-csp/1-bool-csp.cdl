@@ -1,0 +1,25 @@
+#!/usr/bin/env cdl-plan
+
+problem "csp"
+domain "__empty__"
+
+controller print(s: string, x: bool)
+
+behavior __goal__():
+  body:
+    bind x: bool
+    bind y: bool
+    bind z: bool
+
+    assert not x or not y
+    assert y or not z
+    assert z or not x
+
+    print("x", x)
+    print("y", y)
+    print("z", z)
+
+init:
+  # Empty state
+  pass
+

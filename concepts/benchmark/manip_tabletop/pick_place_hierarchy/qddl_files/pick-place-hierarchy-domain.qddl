@@ -1,0 +1,14 @@
+(define
+  (domain pick_place_hierarchy)
+
+  (:object-types
+    (panda-type     "package://concepts/robots/franka_description/robots/panda_arm_hand.urdf")
+    (workspace-type "package://concepts/basic/plane/workspace.urdf")
+    (table-type     "package://concepts/basic/plane/plane.urdf")
+    (cube-type      "package://concepts/basic/box/box-template.urdf")
+  )
+
+  (:predicates
+    (on ?obj ?obj)
+  )
+)

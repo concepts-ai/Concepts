@@ -1,0 +1,24 @@
+#!/usr/bin/env cdl-plan
+
+problem "foreach-loop-demo"
+domain "__empty__"
+
+typedef Object: object
+typedef ObjectList: Object[]
+
+controller print_bar()
+controller print(x: Object)
+
+objects:
+  A, B, C: Object
+
+behavior __goal__():
+  body:
+    foreach x in [A, B, C]:
+      print(x)
+    print_bar()
+    foreach x in [A]:
+      print(x)
+    print_bar()
+    foreach x in ObjectList([]):
+      print(x)

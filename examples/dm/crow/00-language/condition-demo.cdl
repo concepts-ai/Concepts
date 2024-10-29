@@ -1,0 +1,14 @@
+#!/usr/bin/env cdl-plan
+
+problem "condition-demo"
+domain "__empty__"
+
+controller print(x: float32)
+
+behavior __goal__():
+  body:
+    if 1 + 1 == 2:
+      print(1.0)
+    else:
+      print(2.0)
+

@@ -1,0 +1,46 @@
+problem "blocksworld-sussman"
+domain "blocksworld-breakdown.cdl"
+
+#!pragma planner_is_goal_serializable=False
+#!pragma planner_is_goal_ordered=True
+#!pragma planner_always_commit_skeleton=True
+
+objects:
+  A: block
+  B: block
+  C: block
+
+init:
+  on_table[A] = True
+  on_table[B] = True
+  on[C, A] = True
+  foreach x: block:
+    clear[x] = True
+  clear[A] = False
+  handempty[...] = True
+
+
+def bw_goal(x: block, y: block, z: block) -> bool:
+  return on(x, y) and on(y, z)
+
+behavior solve(x: block, y: block, z: block):
+  body:
+    promotable sequential:
+      achieve on(y, z)
+      achieve on(x, y)
+    assert on(y, z) and on(x, y)
+
+
+behavior b(x: block, y: block, z: block):
+  goal:
+    bw_goal(x, y, z)
+  body:
+    let blocks_not_on_table = findall t: block: not on_table(t)
+    foreach t in blocks_not_on_table:
+      achieve_once on_table(t)
+
+    achieve_once handempty()
+    solve(x, y, z)
+
+goal:
+  bw_goal(A, B, C)

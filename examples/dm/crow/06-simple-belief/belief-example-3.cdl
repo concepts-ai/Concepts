@@ -1,0 +1,17 @@
+problem "belief-example-1"
+domain "belief.cdl"
+
+objects:
+  R1, R2: Room
+  O1, O2: Object
+
+init:
+  object_at[O1, R1] = 0.5
+  object_at[O1, R2] = 0.01
+  object_at[O2, R1] = 0.01
+  object_at[O2, R2] = 0.5
+  robot_at[R1] = 1.0
+
+behavior __goal__():
+  body:
+    achieve holding[O2] >= 0.85

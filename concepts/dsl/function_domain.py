@@ -29,6 +29,8 @@ __all__ = ['FunctionDomain', 'resolve_lambda_function_type']
 
 
 class FunctionDomain(DSLDomainBase):
+    """A basic domain definition that contains a collection of types, constants, and functions."""
+
     def __init__(self, name: Optional[str] = None):
         super().__init__(name)
 

@@ -12,6 +12,7 @@
 
 from typing import Any, Union
 
+import jacinle
 import concepts.dsl.expression as E
 from concepts.dsl.expression import Expression
 
@@ -30,7 +31,9 @@ class ExpressionVisitor(object):
         Returns:
             the result of the visit.
         """
-        if isinstance(expr, E.VariableExpression):
+        if isinstance(expr, E.NullExpression):
+            return self.visit_null_expression(expr)
+        elif isinstance(expr, E.VariableExpression):
             return self.visit_variable_expression(expr)
         elif isinstance(expr, E.ObjectConstantExpression):
             return self.visit_object_constant_expression(expr)
@@ -54,6 +57,14 @@ class ExpressionVisitor(object):
             return self.visit_quantification_expression(expr)
         elif isinstance(expr, E.GeneralizedQuantificationExpression):
             return self.visit_generalized_quantification_expression(expr)
+        elif isinstance(expr, E.FindAllExpression):
+            return self.visit_find_all_expression(expr)
+        elif isinstance(expr, E.ObjectCompareExpression):
+            return self.visit_object_compare_expression(expr)
+        elif isinstance(expr, E.ValueCompareExpression):
+            return self.visit_value_compare_expression(expr)
+        elif isinstance(expr, E.ConditionExpression):
+            return self.visit_condition_expression(expr)
         elif isinstance(expr, E.PredicateEqualExpression):
             return self.visit_predicate_equal_expression(expr)
         elif isinstance(expr, E.AssignExpression):
@@ -64,6 +75,9 @@ class ExpressionVisitor(object):
             return self.visit_deictic_assign_expression(expr)
         else:
             raise TypeError(f'Unknown expression type: {type(expr)}.')
+
+    def visit_null_expression(self, expr: E.NullExpression) -> Any:
+        raise NotImplementedError()
 
     def visit_variable_expression(self, expr: E.VariableExpression) -> Any:
         raise NotImplementedError()
@@ -101,6 +115,21 @@ class ExpressionVisitor(object):
     def visit_generalized_quantification_expression(self, expr: E.GeneralizedQuantificationExpression) -> Any:
         raise NotImplementedError()
 
+    def visit_find_one_expression(self, expr: E.FindOneExpression) -> Any:
+        raise NotImplementedError()
+
+    def visit_find_all_expression(self, expr: E.FindAllExpression) -> Any:
+        raise NotImplementedError()
+
+    def visit_object_compare_expression(self, expr: E.ObjectCompareExpression) -> Any:
+        raise NotImplementedError()
+
+    def visit_value_compare_expression(self, expr: E.ValueCompareExpression) -> Any:
+        raise NotImplementedError()
+
+    def visit_condition_expression(self, expr: E.ConditionExpression) -> Any:
+        raise NotImplementedError()
+
     def visit_predicate_equal_expression(self, expr: E.PredicateEqualExpression) -> Any:
         raise NotImplementedError()
 
@@ -115,6 +144,9 @@ class ExpressionVisitor(object):
 
 
 class IdentityExpressionVisitor(ExpressionVisitor):
+    def visit_null_expression(self, expr: E.NullExpression) -> E.NullExpression:
+        return expr
+
     def visit_variable_expression(self, expr: E.VariableExpression) -> E.VariableExpression:
         return type(expr)(expr.variable)
 
@@ -134,10 +166,25 @@ class IdentityExpressionVisitor(ExpressionVisitor):
         return E.BoolExpression(expr.bool_op, [self.visit(child) for child in expr.arguments])
 
     def visit_quantification_expression(self, expr: E.QuantificationExpression) -> E.QuantificationExpression:
-        return E.QuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expr))
+        return E.QuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expression))
 
     def visit_generalized_quantification_expression(self, expr: E.GeneralizedQuantificationExpression) -> E.GeneralizedQuantificationExpression:
-        return E.GeneralizedQuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expr), return_type=expr.return_type)
+        return E.GeneralizedQuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expression), return_type=expr.return_type)
+
+    def visit_find_one_expression(self, expr: E.FindOneExpression) -> E.FindOneExpression:
+        return E.FindOneExpression(expr.variable, self.visit(expr.expression))
+
+    def visit_find_all_expression(self, expr: E.FindAllExpression) -> E.FindAllExpression:
+        return E.FindAllExpression(expr.variable, self.visit(expr.expression))
+
+    def visit_object_compare_expression(self, expr: E.ObjectCompareExpression) -> E.ObjectCompareExpression:
+        return E.ObjectCompareExpression(expr.compare_op, self.visit(expr.lhs), self.visit(expr.rhs))
+
+    def visit_value_compare_expression(self, expr: E.ValueCompareExpression) -> E.ValueCompareExpression:
+        return E.ValueCompareExpression(expr.compare_op, self.visit(expr.lhs), self.visit(expr.rhs))
+
+    def visit_condition_expression(self, expr: E.ConditionExpression) -> Any:
+        return type(expr)(self.visit(expr.condition), self.visit(expr.true_value), self.visit(expr.false_value))
 
     def visit_predicate_equal_expression(self, expr: E.PredicateEqualExpression) -> E.PredicateEqualExpression:
         return type(expr)(self.visit(expr.predicate), self.visit(expr.value))
@@ -155,7 +202,7 @@ class IdentityExpressionVisitor(ExpressionVisitor):
         return type(expr)(self.visit(expr.predicate), self.visit(expr.value), self.visit(expr.condition))
 
     def visit_deictic_assign_expression(self, expr: E.DeicticAssignExpression) -> E.DeicticAssignExpression:
-        return type(expr)(expr.variable, self.visit(expr.expr))
+        return type(expr)(expr.variable, self.visit(expr.expression))
 
     def visit_constant_expression(self, expr: Expression) -> Expression:
         return expr

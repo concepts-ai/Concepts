@@ -1,0 +1,956 @@
+domain "crafting_world"
+
+typedef Tile: object
+typedef Object: object
+typedef Inventory: object
+typedef ObjectType: object
+
+# feature [[state]] tile_up(x: Tile, y: Tile)
+# feature [[state]] tile_down(x: Tile, y: Tile)
+# feature [[state]] tile_left(x: Tile, y: Tile)
+# feature [[state]] tile_right(x: Tile, y: Tile)
+
+feature [[state]] agent_at(x: Tile)
+feature [[state]] object_at(x: Object, y: Tile)
+feature [[state]] inventory_holding(x: Inventory, y: Object)
+feature [[state]] inventory_empty(x: Inventory)
+feature [[state]] object_of_type(x: Object, y: ObjectType)
+
+object_constant Key: ObjectType
+object_constant WorkStation: ObjectType
+object_constant Pickaxe: ObjectType
+object_constant IronOreVein: ObjectType
+object_constant IronOre: ObjectType
+object_constant IronIngot: ObjectType
+object_constant CoalOreVein: ObjectType
+object_constant Coal: ObjectType
+object_constant GoldOreVein: ObjectType
+object_constant GoldOre: ObjectType
+object_constant GoldIngot: ObjectType
+object_constant CobblestoneStash: ObjectType
+object_constant Cobblestone: ObjectType
+object_constant Axe: ObjectType
+object_constant Tree: ObjectType
+object_constant Wood: ObjectType
+object_constant WoodPlank: ObjectType
+object_constant Stick: ObjectType
+object_constant WeaponStation: ObjectType
+object_constant Sword: ObjectType
+object_constant Chicken: ObjectType
+object_constant Feather: ObjectType
+object_constant Arrow: ObjectType
+object_constant ToolStation: ObjectType
+object_constant Shears: ObjectType
+object_constant Sheep: ObjectType
+object_constant Wool: ObjectType
+object_constant Bed: ObjectType
+object_constant BedStation: ObjectType
+object_constant BoatStation: ObjectType
+object_constant Boat: ObjectType
+object_constant SugarCanePlant: ObjectType
+object_constant SugarCane: ObjectType
+object_constant Paper: ObjectType
+object_constant Furnace: ObjectType
+object_constant FoodStation: ObjectType
+object_constant Bowl: ObjectType
+object_constant PotatoPlant: ObjectType
+object_constant Potato: ObjectType
+object_constant CookedPotato: ObjectType
+object_constant BeetrootCrop: ObjectType
+object_constant Beetroot: ObjectType
+object_constant BeetrootSoup: ObjectType
+object_constant Hypothetical: ObjectType
+object_constant Trash: ObjectType
+
+controller ctl_move_to(y: Tile)
+controller ctl_pick_up(x: Inventory, y: Object, z: Tile)
+controller ctl_place_down(x: Inventory, y: Object, z: Tile)
+
+behavior move_to(y: Tile):
+  goal: agent_at(y)
+  body:
+    bind x: Tile where:
+      agent_at(x)
+    ctl_move_to(y)
+  eff:
+    agent_at[x] = False
+    agent_at[y] = True
+
+behavior pick_up(i: Inventory, x: Object):
+  goal: inventory_holding(i, x)
+  body:
+    assert inventory_empty(i)
+    bind pos: Tile where:
+      object_at(x, pos)
+    achieve agent_at(pos)
+    ctl_pick_up(i, x, pos)
+  eff:
+    inventory_holding[i, x] = True
+    inventory_empty[i] = False
+    object_at[x, pos] = False
+
+behavior pick_up_type(t: ObjectType):
+  goal:
+    exists i: Inventory, x: Object where: inventory_holding(i, x) and object_of_type(x, t)
+  body:
+    bind x: Object, pos: Tile where:
+      object_of_type(x, t) and object_at(x, pos)
+    bind i: Inventory where:
+      inventory_empty(i)
+    achieve agent_at(pos)
+    ctl_pick_up(i, x, pos)
+  eff:
+    inventory_holding[i, x] = True
+    inventory_empty[i] = False
+    object_at[x, pos] = False
+
+behavior place_down(y: Object, z: Tile):
+  goal: object_at(y, z)
+  body:
+    bind x: Inventory where:
+      inventory_holding(x, y)
+    assert agent_at(z) and inventory_holding(x, y)
+    ctl_place_down(x, y, z)
+  eff:
+    inventory_holding[x, y] = False
+    inventory_empty[x] = True
+    object_at[y, z] = True
+
+# Arguments: target inventory (to store mined items), target object (to store mined items), the resource to be mined, position of resource being mined (tile), target object type
+controller ctl_mine_0(i: Inventory, x: Object, r: Object, pos: Tile, target_type: ObjectType)
+# Arguments: target inventory (to store mined items), target object (to store mined items), tool inventory, tool object, the resource to be mined, position of resource being mined (tile), target object type
+controller ctl_mine_1(i: Inventory, x: Object, ti: Inventory, t: Object, r: Object, pos: Tile, target_type: ObjectType)
+
+# Arguments: target inventory (to store crafted items), target object (to store crafted items), the first ingredient inventory, the first ingredient object,
+# the workstation object, position of workstation, target object type
+controller ctl_craft_1(i: Inventory, x: Object, yi: Inventory, y: Object, s: Object, pos: Tile, target_type: ObjectType)
+
+# Arguments: target inventory (to store crafted items), target object (to store crafted items), the first ingredient inventory, the first ingredient object,
+# the second ingredient inventory, the second ingredient object, the workstation object, position of workstation, target object type
+controller ctl_craft_2(i: Inventory, x: Object, yi: Inventory, y: Object, zi: Inventory, z: Object, s: Object, pos: Tile, target_type: ObjectType)
+
+# Mining rules
+
+
+behavior mine_iron_ore():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, IronOre)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Pickaxe)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Pickaxe)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, IronOreVein)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, IronOreVein)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, IronOre] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_coal():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Coal)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Pickaxe)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Pickaxe)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, CoalOreVein)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, CoalOreVein)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Coal] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_cobblestone():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Cobblestone)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Pickaxe)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Pickaxe)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, CobblestoneStash)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, CobblestoneStash)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Cobblestone] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_wood():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Wood)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Axe)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Axe)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, Tree)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, Tree)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Wood] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_feather():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Feather)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Sword)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Sword)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, Chicken)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, Chicken)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Feather] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_wool1():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Wool)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Shears)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Shears)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, Sheep)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, Sheep)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Wool] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_wool2():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Wool)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Sword)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Sword)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, Sheep)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, Sheep)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Wool] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_potato():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Potato)
+      )
+    )
+  body:
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, PotatoPlant)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_0(i, x, r, pos, PotatoPlant)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Potato] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_beetroot():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Beetroot)
+      )
+    )
+  body:
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, BeetrootCrop)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_0(i, x, r, pos, BeetrootCrop)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Beetroot] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_gold_ore():
+  goal: 
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, GoldOre)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Pickaxe)
+      )
+    )
+    bind ti: Inventory, t: Object where:
+      inventory_holding(ti, t) and object_of_type(t, Pickaxe)
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, GoldOreVein)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_1(i, x, ti, t, r, pos, GoldOreVein)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, GoldOre] = True
+    object_of_type[x, Hypothetical] = False
+
+behavior mine_sugar_cane():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, SugarCane)
+      )
+    )
+  body:
+    bind pos: Tile, r: Object where:
+      object_at(r, pos) and object_of_type(r, SugarCanePlant)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_mine_0(i, x, r, pos, SugarCanePlant)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, SugarCane] = True
+    object_of_type[x, Hypothetical] = False
+
+
+# Crafting rules
+
+
+behavior craft_wood_plank():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, WoodPlank)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Wood)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, Wood)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, WoodPlank)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, WoodPlank] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, Wood] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_stick():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Stick)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, WoodPlank)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, WoodPlank)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Stick)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Stick] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, WoodPlank] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_arrow():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Arrow)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Feather)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Stick)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, Feather)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Stick)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, Arrow)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Arrow] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, Feather] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Stick] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_sword():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Sword)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, IronIngot)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Stick)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, IronIngot)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Stick)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, Sword)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Sword] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, IronIngot] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Stick] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_shears1():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Shears)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, IronIngot)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, IronIngot)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Shears)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Shears] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, IronIngot] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_shears2():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Shears)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, GoldIngot)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, GoldIngot)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Shears)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Shears] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, GoldIngot] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_iron_ingot():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, IronIngot)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, IronOre)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Coal)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, IronOre)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Coal)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, IronIngot)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, IronIngot] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, IronOre] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Coal] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_gold_ingot():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, GoldIngot)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, GoldOre)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Coal)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, GoldOre)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Coal)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, GoldIngot)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, GoldIngot] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, GoldOre] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Coal] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_bed():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Bed)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, WoodPlank)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Wool)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, WoodPlank)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Wool)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, Bed)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Bed] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, WoodPlank] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Wool] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_boat():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Boat)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, WoodPlank)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, WoodPlank)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Boat)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Boat] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, WoodPlank] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_bowl1():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Bowl)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, WoodPlank)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, WoodPlank)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Bowl)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Bowl] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, WoodPlank] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_bowl2():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Bowl)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, IronIngot)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, IronIngot)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Bowl)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Bowl] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, IronIngot] = False
+    object_of_type[y, Hypothetical] = True
+
+behavior craft_cooked_potato():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, CookedPotato)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Potato)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Coal)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, Potato)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Coal)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, CookedPotato)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, CookedPotato] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, Potato] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Coal] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_beetroot_soup():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, BeetrootSoup)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Beetroot)
+      )
+    )
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, Bowl)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, Beetroot)
+    bind zi: Inventory, z: Object where:
+      inventory_holding(zi, z) and object_of_type(z, Bowl)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+     inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_2(i, x, yi, y, zi, z, s, pos, BeetrootSoup)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, BeetrootSoup] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, Beetroot] = False
+    object_of_type[y, Hypothetical] = True
+    inventory_empty[zi] = True
+    inventory_holding[zi, z] = False
+    object_of_type[z, Bowl] = False
+    object_of_type[z, Hypothetical] = True
+
+behavior craft_paper():
+  goal:
+    exists i: Inventory where: (
+      exists x: Object where: (
+        inventory_holding(i, x) and object_of_type(x, Paper)
+      )
+    )
+  body:
+    achieve exists _i: Inventory where: (
+      exists _x: Object where: (
+        inventory_holding(_i, _x) and object_of_type(_x, SugarCane)
+      )
+    )
+    bind yi: Inventory, y: Object where:
+      inventory_holding(yi, y) and object_of_type(y, SugarCane)
+    bind pos: Tile, s: Object where:
+      object_at(s, pos) and object_of_type(s, WorkStation)
+    bind i: Inventory, x: Object where:
+      inventory_empty(i) and object_of_type(x, Hypothetical)
+    achieve agent_at(pos)
+    do ctl_craft_1(i, x, yi, y, s, pos, Paper)
+  eff:
+    inventory_empty[i] = False
+    inventory_holding[i, x] = True
+    object_of_type[x, Paper] = True
+    object_of_type[x, Hypothetical] = False
+    inventory_empty[yi] = True
+    inventory_holding[yi, y] = False
+    object_of_type[y, SugarCane] = False
+    object_of_type[y, Hypothetical] = True
+

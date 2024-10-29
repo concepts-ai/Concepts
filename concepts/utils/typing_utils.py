@@ -47,6 +47,10 @@ Table of Custom Types
     ``Vec7f``, "A 7D vector of float."
     ``Vec7i``, "A 7D vector of int."
     ``Vec7``, "A 7D vector of float or int."
+    ``VecNf``, "A vector of float."
+    ``VecNi``, "A vector of int."
+    ``MatNf``, "A matrix of float."
+    ``MatNi``, "A matrix of int."
     ``Color``, "A color, can be a 3D or 4D vector of float or int."
     ``Pos2D``, "A 2D position, can be a 2D vector of float or int."
     ``Pos3D``, "A 3D position, can be a 3D vector of float or int."
@@ -55,7 +59,7 @@ Table of Custom Types
 """
 
 import numpy as np
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, TYPE_CHECKING
 
 
 Tuple2f = Tuple[float, float]
@@ -98,9 +102,26 @@ Vec7f = Union[Tuple[float, float, float, float, float, float, float], List[float
 Vec7i = Union[Tuple[int, int, int, int, int, int, int], List[int], np.ndarray]
 Vec7 = Union[Vec7f, Vec7i]
 
+VecNf = Union[Tuple[float, ...], List[float], np.ndarray]
+VecNi = Union[Tuple[int, ...], List[int], np.ndarray]
+
+MatNf = Union[Tuple[Tuple[float, ...], ...], List[List[float]], np.ndarray]
+MatNi = Union[Tuple[Tuple[int, ...], ...], List[List[int]], np.ndarray]
+
 Color = Union[Vec3f, Vec3i, Vec4f, Vec4i]
 Pos2D = Union[Vec2f, Vec2i]
 Pos3D = Union[Vec3f, Vec3i]
 Pos6D = Union[Vec6f, Vec6i]
 Pos7D = Union[Vec7f, Vec7i]
 
+if TYPE_CHECKING:
+    import open3d
+
+Open3DPointCloud = 'open3d.geometry.PointCloud'
+Open3DTriangleMesh = 'open3d.geometry.TriangleMesh'
+
+if TYPE_CHECKING:
+    import trimesh
+
+TrimeshPointCloud = 'trimesh.points.PointCloud'
+Trimesh = 'trimesh.Trimesh'

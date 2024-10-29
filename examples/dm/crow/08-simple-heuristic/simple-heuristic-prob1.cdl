@@ -1,0 +1,18 @@
+#!/usr/bin/env cdl-plan
+
+problem "grid-prob1"
+domain "simple-heuristic-domain.cdl"
+
+#!pragma load_implementation("./simple_heuristic_lib.py")
+#!pragma planner_algo = "priority_tree_v1"
+#!pragma planner_enable_state_hash = False
+#!pragma planner_priority_fn = "simple_additive_astar"
+
+init:
+  robot_loc[...] = loc([0, 1])
+
+behavior __goal__():
+  minimize: cost()
+  body:
+    achieve robot_loc() == loc([3, 3])
+

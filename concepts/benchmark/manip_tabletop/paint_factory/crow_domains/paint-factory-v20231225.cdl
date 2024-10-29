@@ -1,0 +1,163 @@
+domain "paint-factory-v20231225"
+
+typedef Robot: object
+typedef Object: object
+typedef RobotIdentifier: int64
+typedef ObjectIdentifier: int64
+typedef QPos: vector[float32, 6]
+typedef Pose: vector[float32, 2]
+
+feature [[state]] robot_identifier(robot: Robot) -> RobotIdentifier
+feature [[state]] object_identifier(object: Object) -> ObjectIdentifier
+feature [[state]] robot_qpos(robot: Robot) -> QPos
+feature [[state]] object_pose(object: Object) -> Pose
+
+feature [[state]] is_machine(object: Object)
+feature [[state]] is_block(object: Object)
+feature [[state]] is_target(object: Object)
+
+feature [[observation]] object_image(object: Object) -> vector[float32, 3]
+feature [[state]] object_feature(object: Object) -> vector[float32, 64]
+
+def _is_left(id1: ObjectIdentifier, id2: ObjectIdentifier, p1: Pose, p2: Pose) -> bool
+def _is_right(id1: ObjectIdentifier, id2: ObjectIdentifier, p1: Pose, p2: Pose) -> bool
+def _is_in(id1: ObjectIdentifier, id2: ObjectIdentifier, p1: Pose, p2: Pose) -> bool
+
+def _is_red(object_feature: vector[float32, 64]) -> bool
+def _is_green(object_feature: vector[float32, 64]) -> bool
+def _is_yellow(object_feature: vector[float32, 64]) -> bool
+def _is_purple(object_feature: vector[float32, 64]) -> bool
+def _is_pink(object_feature: vector[float32, 64]) -> bool
+def _is_cyan(object_feature: vector[float32, 64]) -> bool
+def _is_brown(object_feature: vector[float32, 64]) -> bool
+def _is_orange(object_feature: vector[float32, 64]) -> bool
+
+def is_red(object: Object) -> bool:
+  return _is_red(object_feature(object))
+def is_green(object: Object) -> bool:
+  return _is_green(object_feature(object))
+def is_yellow(object: Object) -> bool:
+  return _is_yellow(object_feature(object))
+def is_purple(object: Object) -> bool:
+  return _is_purple(object_feature(object))
+def is_pink(object: Object) -> bool:
+  return _is_pink(object_feature(object))
+def is_cyan(object: Object) -> bool:
+  return _is_cyan(object_feature(object))
+def is_brown(object: Object) -> bool:
+  return _is_brown(object_feature(object))
+def is_orange(object: Object) -> bool:
+  return _is_orange(object_feature(object))
+
+def is_left(object1: Object, object2: Object) -> bool:
+  return _is_left(object_identifier(object1), object_identifier(object2), object_pose(object1), object_pose(object2)) and is_block(object1) and is_block(object2)
+
+def is_right(object1: Object, object2: Object) -> bool:
+  return _is_right(object_identifier(object1), object_identifier(object2), object_pose(object1), object_pose(object2)) and is_block(object1) and is_block(object2)
+
+def is_in(object1: Object, object2: Object) -> bool:
+  return _is_in(object_identifier(object1), object_identifier(object2), object_pose(object1), object_pose(object2)) and is_block(object1) and is_target(object2)
+
+controller ctl_move(robot: RobotIdentifier, object: ObjectIdentifier, pose: Pose)
+
+
+behavior move(robot: Robot, object: Object, pose: Pose):
+  body:
+    assert is_block(object)
+    ctl_move(robot_identifier(robot), object_identifier(object), pose)
+  eff:
+    object_pose[object] = pose
+
+
+behavior move_to_container(robot: Robot, object: Object, container: Object):
+  goal:
+    is_in(object, container)
+  body:
+    assert is_block(object)
+    assert is_target(container)
+    move(robot, object, object_pose(container))
+
+
+behavior move_to_machine(robot: Robot, object: Object, machine: Object):
+  pre:
+    assert is_block(object)
+    assert is_machine(machine)
+  body:
+    # TODO: change the object_pose(machine) to an actual pose generator
+    move(robot, object, object_pose(machine))
+  eff:
+    object_pose[object] = object_pose(machine)
+    object_feature[object] = object_feature(machine)
+
+
+behavior paint_red(robot: Robot, object: Object):
+  goal: is_red(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_red(object)
+
+behavior paint_green(robot: Robot, object: Object):
+  goal: is_green(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_green(object)
+
+behavior paint_yellow(robot: Robot, object: Object):
+  goal: is_yellow(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_yellow(object)
+
+behavior paint_purple(robot: Robot, object: Object):
+  goal: is_purple(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_purple(object)
+
+behavior paint_pink(robot: Robot, object: Object):
+  goal: is_pink(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_pink(object)
+
+behavior paint_cyan(robot: Robot, object: Object):
+  goal: is_cyan(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_cyan(object)
+
+behavior paint_brown(robot: Robot, object: Object):
+  goal: is_brown(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_brown(object)
+
+behavior paint_orange(robot: Robot, object: Object):
+  goal: is_orange(object)
+  pre:
+    assert is_block(object)
+  body:
+    bind machine: Object where: is_machine(machine)
+    move_to_machine(robot, object, machine)
+    assert is_orange(object)

@@ -9,15 +9,20 @@
 # Distributed under terms of the MIT license.
 
 import numpy as np
-import jacinle.random as random
+from typing import Optional
 from torch.utils.data.dataset import Dataset
 
 __all__ = ['FamilyTreeDataset', 'Family', 'random_generate_family']
 
 
 class FamilyTreeDataset(Dataset):
-    def __init__(self, nr_people, epoch_size, task, p_marriage=0.8, balance_sample=False):
+    available_tasks = ['has-father', 'has-daughter', 'has-sister', 'parents', 'grandparents', 'uncle', 'maternal-great-uncle']
+
+    def __init__(self, nr_people, epoch_size, task, p_marriage=0.8, balance_sample=False, np_random: Optional[np.random.RandomState] = None, seed: Optional[int] = None):
         super().__init__()
+
+        self.np_random = np_random if np_random is not None else np.random.RandomState(seed)
+
         if type(nr_people) is int:
             self.nr_people = (max(nr_people // 2, 1), nr_people)
         else:
@@ -28,16 +33,16 @@ class FamilyTreeDataset(Dataset):
         self.balance_sample = balance_sample
         self.data = []
 
-        assert task in ['has-father', 'has-daughter', 'has-sister', 'parents', 'grandparents', 'uncle', 'maternal-great-uncle']
+        assert task in type(self).available_tasks, "Task {} is not supported.".format(task)
 
     def _gen_family(self, item):
         nr_people = item % (self.nr_people[1] - self.nr_people[0] + 1) + self.nr_people[0]
-        return random_generate_family(nr_people, self.p_marriage)
+        return random_generate_family(nr_people, self.p_marriage, np_random=self.np_random)
 
     def __getitem__(self, item):
         while len(self.data) == 0:
             family = self._gen_family(item)
-            relations = family._relations[:, :, 2:]
+            relations = family.relations[:, :, 2:]
             if self.task == 'has-father':
                 target = family.has_father()
             elif self.task == 'has-daughter':
@@ -56,21 +61,21 @@ class FamilyTreeDataset(Dataset):
                 assert False, "{} is not supported.".format(self.task)
 
             if not self.balance_sample:
-                return dict(n=family._n, relations=relations, target=target)
+                return dict(n=family.n, relations=relations, target=target)
 
             def get_position(x):
                 return list(np.vstack(np.where(x)).T)
 
             def append_data(pos, target):
-                states = np.zeros((family._n, 2))
+                states = np.zeros((family.n, 2))
                 states[pos[0], 0] = states[pos[1], 1] = 1
-                self.data.append(dict(n=family._n, relations=relations, states=states, target=target))
+                self.data.append(dict(n=family.n, relations=relations, states=states, target=target))
 
             positive = get_position(target == 1)
             if len(positive) == 0:
                 continue
             negative = get_position(target == 0)
-            np.random.shuffle(negative)
+            self.np_random.shuffle(negative)
             negative = negative[:len(positive)]
             for i in positive:
                 append_data(i, 1)
@@ -101,6 +106,14 @@ class Family(object):
         """
         self._n = nr_people
         self._relations = relations
+
+    @property
+    def n(self) -> int:
+        return self._n
+    
+    @property
+    def relations(self) -> np.ndarray:
+        return self._relations
 
     @property
     def father(self) -> np.ndarray:
@@ -147,9 +160,12 @@ class Family(object):
         return _clip_mul(_clip_mul(self.get_grandmother(), self.mother), self.son)
 
 
-def random_generate_family(n, p_marriage=0.8, verbose=False) -> Family:
+def random_generate_family(n, p_marriage=0.8, verbose=False, np_random: Optional[np.random.RandomState] = None) -> Family:
+    if np_random is None:
+        np_random = np.random
+
     assert n > 0
-    ids = list(random.permutation(n))
+    ids = list(np_random.permutation(n))
 
     single_m = []
     single_w = []
@@ -197,8 +213,8 @@ def random_generate_family(n, p_marriage=0.8, verbose=False) -> Family:
 
     while len(ids) > 0:
         x = ids.pop()
-        gender = random.randint(2)
-        parents = random.choice_list(couples)
+        gender = np_random.randint(2)
+        parents = couples[np_random.randint(len(couples))]
         if gender == 0:
             single_m.append(x)
         else:
@@ -206,9 +222,9 @@ def random_generate_family(n, p_marriage=0.8, verbose=False) -> Family:
         if parents is not None:
             add_child(parents, x, gender)
 
-        if random.rand() < p_marriage and len(single_m) > 0 and len(single_w) > 0:
-            mi = random.randint(len(single_m))
-            wi = random.randint(len(single_w))
+        if np_random.rand() < p_marriage and len(single_m) > 0 and len(single_w) > 0:
+            mi = np_random.randint(len(single_m))
+            wi = np_random.randint(len(single_w))
             man = single_m[mi]
             woman = single_w[wi]
             if check_relations(man, woman):

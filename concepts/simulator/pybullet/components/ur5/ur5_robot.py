@@ -15,20 +15,18 @@ import numpy as np
 import pybullet as p
 import jacinle
 
-from typing import Optional, Tuple, Union
+from typing import Optional
+from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate
 from concepts.simulator.pybullet.client import BulletClient
-from concepts.simulator.pybullet.components.robot_base import Robot, Gripper, GripperObjectIndices, RobotActionPrimitive
+from concepts.simulator.pybullet.components.robot_base import BulletArmRobotBase, BulletGripperBase, GripperObjectIndices, BulletRobotActionPrimitive
 from concepts.simulator.pybullet.components.ur5.ur5_gripper import UR5GripperType
-from concepts.simulator.pybullet.rotation_utils import compose_transformation, rotate_vector, quat_mul, quat_conjugate
 
 __all__ = ['UR5Robot', 'UR5ReachAndPick', 'UR5ReachAndPlace', 'UR5PlanarMove']
 
 logger = jacinle.get_logger(__file__)
 
-g_debug_options = jacinle.FileOptions(__file__, show_timeout_warning=True)
 
-
-class UR5Robot(Robot):
+class UR5Robot(BulletArmRobotBase):
     UR5_FILE = 'assets://robots/ur5/ur5.urdf'
     UR5_JOINT_HOMES = np.array([-1, -0.5, 0.5, -0.5, -0.5, 0]) * np.pi
 
@@ -52,10 +50,10 @@ class UR5Robot(Robot):
         self.ur5_joints_lower = np.array([-3 * np.pi / 2, -2.3562, -17, -17, -17, -17], dtype=np.float32)
         self.ur5_joints_upper = np.array([-np.pi / 2, 0, 17, 17, 17, 17], dtype=np.float32)
         self.ur5_ee_tip = 10
-        self.ik_fast_wrapper = None
+        self.ikfast_wrapper = None
 
         gripper_cls = self.gripper_type.get_class()
-        self.gripper: Optional[Gripper] = None
+        self.gripper: Optional[BulletGripperBase] = None
         if gripper_cls is not None:
             self.gripper = gripper_cls(client, self.ur5, 9, self.gripper_objects)
 
@@ -78,8 +76,11 @@ class UR5Robot(Robot):
     def set_ignore_physics(self, ignore_physics: bool = True):
         self._ignore_physics = ignore_physics
 
-    def get_robot_body_id(self) -> int:
+    def get_body_id(self) -> int:
         return self.ur5
+
+    def get_ee_link_id(self) -> int:
+        return self.ur5_ee_tip
 
     def get_qpos(self) -> np.ndarray:
         return np.array([self.client.p.getJointState(self.ur5, i)[0] for i in self.ur5_joints], dtype=np.float32)
@@ -95,10 +96,6 @@ class UR5Robot(Robot):
         if self.gripper is not None:
             self.gripper.release()
 
-    def get_ee_pose(self, fk: bool = True) -> Tuple[np.ndarray, np.ndarray]:
-        state = self.world.get_link_state_by_id(self.ur5, self.ur5_ee_tip, fk=fk)
-        return state.position, state.orientation
-
     def get_ee_home_pos(self) -> np.ndarray:
         return self.ee_home_pos
 
@@ -107,19 +104,6 @@ class UR5Robot(Robot):
 
     def get_gripper_state(self) -> Optional[bool]:
         return self.gripper.activated if self.gripper is not None else None
-
-    def fk(self, qpos: np.ndarray, link_name_or_id: Optional[Union[str, int]] = None) -> Tuple[np.ndarray, np.ndarray]:
-        if link_name_or_id is None:
-            link_id = self.ur5_ee_tip
-        elif isinstance(link_name_or_id, str):
-            link_id = self.client.world.get_link_index_with_body(self.ur5, link_name_or_id)
-        else:
-            link_id = link_name_or_id
-
-        with self.world.save_body(self.ur5):
-            self.set_qpos(qpos)
-            state = self.world.get_link_state_by_id(self.ur5, link_id)
-            return state.position, state.orientation
 
     def ik_pybullet(self, pos: np.ndarray, quat: np.ndarray, force: bool = False, verbose: bool = False) -> Optional[np.ndarray]:
         """Calculate joint configuration with inverse kinematics."""
@@ -141,10 +125,10 @@ class UR5Robot(Robot):
         return joints
 
     def _init_ikfast(self):
-        if self.ik_fast_wrapper is None:
-            from concepts.simulator.pybullet.ikfast.ikfast_common import IKFastWrapper
-            import concepts.simulator.pybullet.ikfast.ur5.ikfast_ur5 as ikfast_module
-            self.ik_fast_wrapper = IKFastWrapper(
+        if self.ikfast_wrapper is None:
+            from concepts.simulator.pybullet.pybullet_ikfast_utils import IKFastPyBulletWrapper
+            import concepts.simulator.ikfast.ur5.ikfast_ur5 as ikfast_module
+            self.ikfast_wrapper = IKFastPyBulletWrapper(
                 self.world, ikfast_module,
                 body_id=self.ur5,
                 joint_ids=self.ur5_joints,
@@ -164,14 +148,14 @@ class UR5Robot(Robot):
         inner_pos, inner_quat = pos, quat
 
         body_state = self.world.get_body_state_by_id(self.ur5)
-        inner_pos = inner_pos - np.array(body_state.position)
         inner_quat = quat_mul(inner_quat, quat_conjugate([0.70704, -0.70703, -0.01, 0.01023]))
-        if not np.allclose(body_state.orientation, [0, 0, 0, 1]):
-            # TODO(Jiayuan Mao @ 2022/12/27): solve when orientation != identity.
-            raise NotImplementedError('IKFast does not support non-identity orientation for the robot yet.')
 
         try:
-            ik_solution = list(itertools.islice(self.ik_fast_wrapper.gen_ik(inner_pos, inner_quat, last_qpos=last_qpos, max_attempts=max_attempts, max_distance=max_distance, verbose=False), 1))[0]
+            ik_solution = list(itertools.islice(self.ikfast_wrapper.gen_ik(
+                inner_pos, inner_quat, last_qpos=last_qpos, max_attempts=max_attempts, max_distance=max_distance,
+                body_pos=body_state.position, body_quat=body_state.quaternion,
+                verbose=False
+            ), 1))[0]
         except IndexError:
             if error_on_fail:
                 raise
@@ -228,7 +212,7 @@ class UR5Robot(Robot):
                 )
                 self.client.step()
 
-        if g_debug_options.show_timeout_warning:
+        if not self.warnings_suppressed:
             logger.warning(f'{self.body_name}: move qpos exceeded {timeout} second timeout.')
         return False
 
@@ -241,7 +225,7 @@ class UR5Robot(Robot):
             return self.gripper.release()
 
 
-class UR5ReachAndPick(RobotActionPrimitive):
+class UR5ReachAndPick(BulletRobotActionPrimitive):
     robot: UR5Robot
 
     def __init__(self, robot: UR5Robot, height=0.32, speed=0.01):
@@ -287,7 +271,7 @@ class UR5ReachAndPick(RobotActionPrimitive):
         return True
 
 
-class UR5ReachAndPlace(RobotActionPrimitive):
+class UR5ReachAndPlace(BulletRobotActionPrimitive):
     robot: UR5Robot
 
     def __init__(self, robot: UR5Robot, height=0.32, speed=0.01):
@@ -329,7 +313,7 @@ class UR5ReachAndPlace(RobotActionPrimitive):
         return succ
 
 
-class UR5PlanarMove(RobotActionPrimitive):
+class UR5PlanarMove(BulletRobotActionPrimitive):
     robot: UR5Robot
 
     def __init__(self, robot: UR5Robot, speed=0.01):

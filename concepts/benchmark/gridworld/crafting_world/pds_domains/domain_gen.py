@@ -5,7 +5,7 @@
 # Email  : maojiayuan@gmail.com
 # Date   : 01/06/2023
 #
-# This file is part of HACL-PyTorch.
+# This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
 """Generate the domain file for the crafting world."""

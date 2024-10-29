@@ -1,0 +1,34 @@
+domain "grid"
+
+typedef delta: vector[int64, 2]
+typedef loc: vector[int64, 2]
+
+feature [[state]] robot_loc() -> loc
+
+def wall_at(l: loc) -> bool
+def l1_distance(a: loc, b: loc) -> float32
+
+def robot_at(l: loc) -> bool :
+  return robot_loc() == l
+
+controller move(d: loc):
+  eff:
+    robot_loc = robot_loc + d
+
+behavior move_to(target: loc, d: loc) :   # had to change type of d from delta
+  body:
+    preamble:
+      assert not wall_at(target)
+      let prev_loc : loc = target - d
+    achieve_once robot_loc() == prev_loc
+    move(d)
+
+behavior move_to_wrapper(target: loc):
+  goal: robot_loc() == target
+  body:
+    alternative:
+      move_to(target, loc([0, 1]))
+      move_to(target, loc([0, -1]))
+      move_to(target, loc([1, 0]))
+      move_to(target, loc([-1, 0]))
+

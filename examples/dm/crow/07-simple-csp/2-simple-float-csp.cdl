@@ -1,0 +1,34 @@
+#!/usr/bin/env cdl-plan
+
+problem "simple-float-csp"
+domain "__empty__"
+
+# Load the implementation for these functions written in Python
+# The implementation is in the file 2-simple-float-csp.py
+# Now the plan can be generated directly using the CLI tool:
+#   cdl-plan 2-simple-float-csp.cdl
+#!pragma load_implementation("2-simple-float-csp.py")
+
+def f(x: float32) -> float32
+
+generator inv_f(x: float32, y: float32):
+  goal: f(x) == y
+  in: y
+  out: x
+
+generator inv_plus(x: float32, y: float32, z: float32):
+  goal: x + y == z
+  in: z
+  out: x, y
+
+controller print(s: string, x: float32)
+
+behavior __goal__():
+  body:
+    bind x: float32
+    bind y: float32
+
+    assert f(x) + f(y) == 7.0
+    print("x", x)
+    print("y", y)
+

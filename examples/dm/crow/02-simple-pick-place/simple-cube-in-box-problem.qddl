@@ -1,0 +1,48 @@
+(define
+  (problem simple-cube-in-box)
+  (:domain tabletop)
+  (:objects
+    world - qr::world-type
+    panda - panda-type
+    workspace - workspace-type
+    table - table-type
+    cube - cube-type
+    box - box-type
+  )
+  (:init
+    (weld world::world workspace (1, 0, 0, 0, 0, 0))
+    (weld world::world table (0, 0, -0.001, 0, 0, 0))
+    (weld world::world panda (0, 0, 0, 0, 0, 0))
+    (weld world::world box (0.5, -0.3, 0.05, 0, 0, 0))
+
+    ;; PANDA_JOINT_HOMES = np.array([-0.45105, -0.38886, 0.45533, -2.19163, 0.13169, 1.81720, 0.51563])
+    (joint-conf panda::panda_joint1 -0.45105)
+    (joint-conf panda::panda_joint2 -0.38886)
+    (joint-conf panda::panda_joint3 0.45533)
+    (joint-conf panda::panda_joint4 -2.19163)
+    (joint-conf panda::panda_joint5 0.13169)
+    (joint-conf panda::panda_joint6 1.81720)
+    (joint-conf panda::panda_joint7 0.51563)
+
+    (body-pose cube (0.5, 0.3, 0.025, 0, 0, 0))
+
+    (urdf::prop box "DIM" (0.2, 0.2, 0.1))
+    (urdf::prop box "HALF" (0.1, 0.1, 0.05))
+    ;; rgba is directly set through the load_urdf function so we are listing it as a urdf-load-arg here
+    (urdf::load-arg box "rgba" (0.5, 1.0, 0.5, 1.0))
+    (urdf::prop cube "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop cube "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop cube "MASS" 0.2)
+    (urdf::prop cube "LATERAL_FRICTION" 1.0)
+    ;; rgba is directly set through the load_urdf function so we are listing it as a urdf-load-arg here
+    (urdf::load-arg cube "rgba" (1.0, 0.34, 0.34, 1.0))
+
+    (sim::camera-distance 1.5)
+    (sim::camera-yaw 90)
+    (sim::camera-pitch -25)
+    (sim::camera-look-at (0, 0, 0))
+  )
+  (:goal (and
+    (in cube box)
+  ))
+)

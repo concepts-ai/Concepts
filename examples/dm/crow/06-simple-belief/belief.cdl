@@ -1,0 +1,58 @@
+domain "crowbob"
+
+typedef Object: object
+typedef Room: object
+typedef prob: float32
+
+feature [[state]] robot_at(r: Room) -> prob
+feature [[state]] holding(x: Object) -> prob
+feature [[state]] object_at(x: Object, y: Room) -> prob
+feature [[state, default=0.0]] cost() -> float32
+
+def sqrt(x: prob) -> prob
+def log(x: prob) -> prob
+def move_to_target_belief_update(prior: prob[Room], r: Room) -> prob[Room]
+def look_to_find_belief_update(prior: prob, o: Object, r: Room) -> prob
+
+controller move(r: Room):
+  eff:
+    robot_at[:] = move_to_target_belief_update(robot_at[:], r)
+    cost += 1.0
+
+controller look_for(r: Room, o: Object):
+  eff:
+    object_at[o, r] = look_to_find_belief_update(object_at[o, r], o, r)
+    cost += -log(object_at[o, r]) - log(robot_at[r])
+
+controller pick(r: Room, o: Object):
+  eff:
+    holding[o] = robot_at[r] * object_at[o, r]
+    cost += 1.0
+
+behavior b_move(r: Room, posterior: prob):
+  goal:
+    robot_at(r) >= posterior
+  body:
+    while robot_at(r) < posterior:
+      do move(r)
+
+behavior b_pick(o: Object, posterior: prob):
+  goal:
+    holding(o) >= posterior
+  body:
+    # For now, use a hard-coded posterior ratio between object_at and robot_at.
+    let component_posterior = sqrt(posterior)
+    achieve_once exists r: Room where: object_at(o, r) >= component_posterior
+    bind r: Room where: object_at(o, r) >= component_posterior
+    achieve robot_at(r) >= component_posterior
+    do pick(r, o)
+
+behavior b_look_for(o: Object, posterior: prob):
+  goal:
+    exists r: Room where: object_at(o, r) >= posterior
+  body:
+    bind r: Room
+    # Another hard-coded posterior for robot_at.
+    achieve robot_at(r) >= 0.9
+    while object_at(o, r) < posterior:
+      do look_for(r, o)

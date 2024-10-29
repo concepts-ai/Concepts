@@ -16,17 +16,29 @@ All types extend the base class :class:`TypeBase`.
 
     - :class:`ObjectType`: corresponds to an object in the physical world.
     - :class:`ValueType`: corresponds to an encoding of a feature of the object.
-    - :class:`UnionType`: corresponds to a union of types.
-    - :class:`ListType`: corresponds to a list type.
+    - :class:`Sequence`: corresponds to a tuple type, a list type, or a multidimensional list type.
     - :class:`~concepts.dsl.dsl_functions.FunctionType`: corresponds to a function over the encodings.
     - :class:`~concepts.dsl.dsl_functions.OverloadedFunctionType`: corresponds to a collection of functions that share the same name.
+    - :class:`UnionType`: corresponds to a union of types.
 
 Furthermore, :class:`ValueType` has four derived types::
 
     - :class:`ConstantType`: corresponds to a constant.
-    - :class:`SequenceType`: corresponds to a sequence of values.
     - :class:`TensorValueTypeBase`: corresponds to a tensor-based encoding.
     - :class:`PyObjValueType`: corresponds to an arbitrary Python object.
+
+
+:class:`TensorValueTypeBase` has three derived types::
+
+    - :class:`ScalarValueType`: corresponds to a scalar value.
+    - :class:`VectorValueType`: corresponds to a vector.
+    - :class:`NamedTensorValueType`: corresponds to a named tensor.
+
+:class:`SequenceType` has two derived types::
+
+    - :class:`TupleType`: corresponds to a tuple.
+    - :class:`ListType`: corresponds to a list. This type is also of type :class:`VariableSizedSequenceType`.
+    - :class:`MultidimensionalListType`: corresponds to a multidimensional list. This type is also of type :class:`VariableSizedSequenceType`.
 """
 
 import torch
@@ -38,15 +50,19 @@ from jacinle.utils.defaults import option_context
 
 if TYPE_CHECKING:
     from concepts.dsl.dsl_functions import FunctionType
+    from concepts.dsl.value import ListValue
+    from concepts.dsl.tensor_state import StateObjectReference, StateObjectList
 
 logger = get_logger(__file__)
 
 __all__ = [
     'FormatContext', 'get_format_context',
-    'TypeBase', 'UnionType', 'ObjectType', 'ValueType',
-    'AutoType', 'AnyType', 'UnionTyping', 'ListType', 'is_any_type', 'is_auto_type',  # Special types and type constructors.
-    'TensorValueTypeBase', 'PyObjValueType', 'ConstantType', 'SequenceValueType',  # Derived from ValueType.
-    'ScalarValueType', 'BOOL', 'INT64', 'FLOAT32', 'VectorValueType', 'NamedTensorValueType',  # Derived from TensorValueTypeBase.
+    'TypeBase', 'AliasType',
+    'UnionType',
+    'AutoType', 'AnyType', 'UnionTyping', 'is_any_type', 'is_auto_type',  # Special types and type constructors.
+    'ObjectType',
+    'ValueType', 'ConstantType', 'PyObjValueType', 'TensorValueTypeBase', 'ScalarValueType', 'STRING', 'BOOL', 'INT64', 'FLOAT32', 'VectorValueType', 'NamedTensorValueType',  # Value types.
+    'SequenceType', 'TupleType', 'UniformSequenceType', 'ListType', 'BatchedListType',  # Sequence types.
     'QINDEX', 'Variable', 'ObjectConstant', 'UnnamedPlaceholder'  # Placeholder-like objects.
 ]
 
@@ -107,13 +123,79 @@ class TypeBase(object):
         return self._parent_type
 
     @property
+    def element_type(self) -> Optional['TypeBase']:
+        """The element type of the type."""
+        raise TypeError(f'Type {self.typename} does not have an element type.')
+
+    def set_parent_type(self, parent_type: 'TypeBase'):
+        self._parent_type = parent_type
+
+    @property
     def parent_typename(self):
         """Return the typename of the parent type."""
         return self._parent_type.typename
 
     @property
-    def is_list_type(self):
+    def base_typename(self):
+        """Return the typename of the base type."""
+        if self._parent_type is None:
+            return self.typename
+        return self._parent_type.base_typename
+
+    @property
+    def is_wrapped_value_type(self) -> bool:
+        return False
+
+    @property
+    def is_object_type(self) -> bool:
+        """Return whether the type is an object type."""
+        return False
+
+    @property
+    def is_value_type(self) -> bool:
+        """Return whether the type is a value type."""
+        return False
+
+    @property
+    def is_tensor_value_type(self) -> bool:
+        """Return whether the type is a tensor value type."""
+        return False
+
+    @property
+    def is_scalar_value_type(self) -> bool:
+        return False
+
+    @property
+    def is_vector_value_type(self) -> bool:
+        return False
+
+    @property
+    def is_pyobj_value_type(self) -> bool:
+        """Return whether the type is a Python object value type."""
+        return False
+
+    @property
+    def is_sequence_type(self) -> bool:
+        """Return whether the type is a sequence type."""
+        return False
+
+    @property
+    def is_tuple_type(self) -> bool:
+        """Return whether the type is a tuple type."""
+        return False
+
+    @property
+    def is_uniform_sequence_type(self) -> bool:
+        return False
+
+    @property
+    def is_list_type(self) -> bool:
         """Return whether the type is a list type."""
+        return False
+
+    @property
+    def is_batched_list_type(self) -> bool:
+        """Return whether the type is a multidimensional list type."""
         return False
 
     def __str__(self) -> str:
@@ -134,6 +216,10 @@ class TypeBase(object):
         """Return the long string representation of the type."""
         return f'Type[{self.short_str()}]'
 
+    def assignment_type(self) -> 'TypeBase':
+        """Return the value type for assignment."""
+        return self
+
     def downcast_compatible(self, other: 'TypeBase', allow_self_list: bool = False, allow_list: bool = False) -> bool:
         """Check if the type is downcast-compatible with the other type; that is, if this type is a subtype of the other type.
 
@@ -142,11 +228,31 @@ class TypeBase(object):
             allow_self_list: if True, this type can be a list type derived from the other type.
             allow_list: if True, the other type can be a list type derived from the type.
         """
-        if allow_self_list and isinstance(self, ListType):
-            return self.element_type.typename == other.typename or self.element_type == AnyType or self.element_type == AutoType
-        if allow_list and isinstance(other, ListType):
-            return self.typename == other.element_type.typename or self == AnyType or self == AutoType
-        return self.typename == other.typename or self == AnyType or self == AutoType
+        if self.typename == other.typename or self == AnyType or self == AutoType:
+            return True
+        if self.parent_type is not None and self.parent_type.downcast_compatible(other, allow_self_list=allow_self_list, allow_list=allow_list):
+            return True
+        if self.is_uniform_sequence_type and other.is_uniform_sequence_type:
+            if not self.element_type.downcast_compatible(other.element_type, allow_self_list=False, allow_list=False):
+                return False
+            if self.is_batched_list_type and other.is_batched_list_type:
+                if len(self.index_dtypes) != len(other.index_dtypes):
+                    return False
+                for i, j in zip(self.index_dtypes, other.index_dtypes):
+                    if not i.downcast_compatible(j, allow_self_list=False, allow_list=False):
+                        return False
+                return True
+            return True
+        if allow_self_list and self.is_uniform_sequence_type:
+            if self.element_type.downcast_compatible(other, allow_self_list=False, allow_list=False):
+                return True
+        if allow_list and self.is_uniform_sequence_type:
+            if self.downcast_compatible(other.element_type, allow_self_list=False, allow_list=False):
+                return True
+        return False
+
+    def unwrap_alias(self):
+        return self
 
     def __eq__(self, other: 'TypeBase') -> bool:
         return self.typename == other.typename
@@ -156,6 +262,83 @@ class TypeBase(object):
 
     def __hash__(self) -> int:
         return hash(self.typename)
+
+
+class AliasType(TypeBase):
+    def __init__(self, typename: str, parent_type: TypeBase, alias: Optional[str] = None):
+        super().__init__(typename, alias=alias, parent_type=parent_type)
+
+    @property
+    def is_wrapped_value_type(self):
+        return True
+
+    @property
+    def is_object_type(self) -> bool:
+        return self.parent_type.is_object_type
+
+    @property
+    def is_value_type(self) -> bool:
+        return self.parent_type.is_value_type
+
+    @property
+    def is_tensor_value_type(self) -> bool:
+        return self.parent_type.is_tensor_value_type
+
+    @property
+    def is_scalar_value_type(self) -> bool:
+        return self.parent_type.is_scalar_value_type
+
+    @property
+    def is_vector_value_type(self) -> bool:
+        return self.parent_type.is_vector_value_type
+
+    @property
+    def is_pyobj_value_type(self) -> bool:
+        return self.parent_type.is_pyobj_value_type
+
+    @property
+    def is_sequence_type(self) -> bool:
+        return self.parent_type.is_sequence_type
+
+    @property
+    def is_tuple_type(self) -> bool:
+        return self.parent_type.is_tuple_type
+
+    @property
+    def is_uniform_sequence_type(self) -> bool:
+        return self.parent_type.is_uniform_sequence_type
+
+    @property
+    def is_list_type(self) -> bool:
+        return self.parent_type.is_list_type
+
+    @property
+    def is_batched_list_type(self) -> bool:
+        return self.parent_type.is_batched_list_type
+
+    def downcast_compatible(self, other: TypeBase, allow_self_list: bool = False, allow_list: bool = False) -> bool:
+        return self.parent_type.downcast_compatible(other, allow_self_list=allow_self_list, allow_list=allow_list)
+
+    def assignment_type(self) -> TypeBase:
+        return self.parent_type.assignment_type()
+
+    @property
+    def element_type(self) -> Optional['TypeBase']:
+        return self.parent_type.element_type
+
+    def short_str(self) -> str:
+        return f'{self.typename} alias {self.parent_type.short_str()}'
+
+    def unwrap_alias(self):
+        return self.parent_type.unwrap_alias()
+
+    def __eq__(self, other: TypeBase) -> bool:
+        if isinstance(other, AliasType):
+            return other.parent_type == self.parent_type
+        return self.parent_type == other
+
+    def __hash__(self) -> int:
+        return hash(self.parent_type)
 
 
 """AnyType corresponds to the union of all types."""
@@ -225,6 +408,10 @@ class ObjectType(TypeBase):
 
         self.parent_types = tuple(parent_types) if parent_types is not None else tuple()
 
+    @property
+    def is_object_type(self):
+        return True
+
     parent_types: Tuple['ObjectType', ...]
     """The parent types of the object type."""
 
@@ -248,12 +435,37 @@ class ObjectType(TypeBase):
 class ValueType(TypeBase):
     """The ValueType corresponds to a value of a certain type."""
 
+    @property
+    def is_value_type(self):
+        return True
+
     def long_str(self) -> str:
         return f'VT[{self.typename}]'
 
-    def assignment_type(self) -> 'ValueType':
-        """Return the value type for assignment."""
-        return self
+
+class ConstantType(ValueType):
+    """The ConstantType corresponds to a constant value."""
+
+    def long_str(self) -> str:
+        return f'CT[{self.typename}]'
+
+
+class PyObjValueType(ValueType):
+    def __init__(self, pyobj_type: Union[type, str], typename: Optional[str] = None, alias: Optional[str] = None, parent_type: Optional['PyObjValueType'] = None):
+        self.pyobj_type = pyobj_type
+        if typename is None:
+            if isinstance(pyobj_type, type):
+                typename = pyobj_type.__name__
+            else:
+                typename = str(pyobj_type)
+        super().__init__(typename, alias=alias, parent_type=parent_type)
+
+    @property
+    def is_pyobj_value_type(self):
+        return True
+
+    pyobj_type: Union[type, str]
+    """The underlying Python object type."""
 
 
 class TensorValueTypeBase(ValueType):
@@ -262,6 +474,10 @@ class TensorValueTypeBase(ValueType):
     def __init__(self, typename: str, quantized: bool, alias: Optional[str] = None):
         super().__init__(typename, alias)
         self._quantized = quantized
+
+    @property
+    def is_tensor_value_type(self):
+        return True
 
     @property
     def quantized(self) -> bool:
@@ -314,45 +530,6 @@ class TensorValueTypeBase(ValueType):
             raise TypeError(f'Unsupported tensor type: {tensor.dtype}.')
 
 
-class PyObjValueType(ValueType):
-    def __init__(self, pyobj_type: Union[type, str], alias: Optional[str] = None):
-        self.pyobj_type = pyobj_type
-        super().__init__(str(pyobj_type), alias=alias)
-
-    pyobj_type: Union[type, str]
-    """The underlying Python object type."""
-
-
-class SequenceValueType(ValueType):
-    """The SequenceValueType corresponds to a sequence of values of a certain type."""
-
-    def __init__(self, value_type: ValueType, alias: Optional[str] = None):
-        """Initialize the sequence value type.
-
-        Args:
-            value_type: The value type of the sequence.
-        """
-        super().__init__(f'Sequence[{value_type.typename}]', alias=alias)
-        self.value_type = value_type
-
-    value_type: ValueType
-    """The value type of the sequence."""
-
-    def long_str(self) -> str:
-        return f'SequenceT[{self.value_type.typename}]'
-
-    def assignment_type(self) -> 'ValueType':
-        """Return the value type for assignment."""
-        return self
-
-
-class ConstantType(ValueType):
-    """The ConstantType corresponds to a constant value."""
-
-    def long_str(self) -> str:
-        return f'CT[{self.typename}]'
-
-
 class ScalarValueType(TensorValueTypeBase):
     TENSOR_DTYPE_MAPPING = {
         'int32': torch.int32,
@@ -374,6 +551,10 @@ class ScalarValueType(TensorValueTypeBase):
         if typename not in type(self).TENSOR_DTYPE_MAPPING:
             raise TypeError(f'Unknown scalar value type: {typename}.')
         super().__init__(typename, quantized=type(self).TENSOR_DTYPE_QUANTIZED[typename])
+
+    @property
+    def is_scalar_value_type(self):
+        return True
 
     def ndim(self) -> int:
         return 0
@@ -404,6 +585,7 @@ class ScalarValueType(TensorValueTypeBase):
 BOOL = ScalarValueType('bool')
 INT64 = ScalarValueType('int64')
 FLOAT32 = ScalarValueType('float32')
+STRING = PyObjValueType(str, 'string')
 
 
 class VectorValueType(TensorValueTypeBase):
@@ -414,7 +596,7 @@ class VectorValueType(TensorValueTypeBase):
         self.choices = choices
         self.factors = factors
 
-        typename = f'vector[{self.dtype}, dim={self.dim}, choices={self.choices}, factors={self.factors}]'
+        typename = self._gen_typename()
         quantized = choices > 0
         super().__init__(typename, quantized=quantized, alias=alias)
 
@@ -429,6 +611,24 @@ class VectorValueType(TensorValueTypeBase):
 
     factors: int
     """The number of factors of the vector."""
+
+    @property
+    def element_type(self) -> ScalarValueType:
+        return self.dtype
+
+    @property
+    def is_vector_value_type(self):
+        return True
+
+    def _gen_typename(self) -> str:
+        inner_string = f'{self.dtype.typename}'
+        if self.dim > 0:
+            inner_string += f', dim={self.dim}'
+        if self.choices > 0:
+            inner_string += f', choices={self.choices}'
+        if self.factors > 1:
+            inner_string += f', factors={self.factors}'
+        return f'vector[{inner_string}]'
 
     def ndim(self) -> int:
         return 1
@@ -457,30 +657,27 @@ class VectorValueType(TensorValueTypeBase):
 
 
 class NamedTensorValueType(TensorValueTypeBase):
-    def __init__(self, typename: str, base_type: TensorValueTypeBase):
-        super().__init__(typename, base_type._quantized)
-        self.base_type = base_type
-
-    base_type: TensorValueTypeBase
-    """The base tensor value type."""
+    def __init__(self, typename: str, parent_type: TensorValueTypeBase):
+        super().__init__(typename, parent_type._quantized)
+        self.set_parent_type(parent_type)
 
     def ndim(self) -> int:
-        return self.base_type.ndim()
+        return self.parent_type.ndim()
 
     def size(self) -> int:
-        return self.base_type.size()
+        return self.parent_type.size()
 
     def size_tuple(self) -> Tuple[int]:
-        return self.base_type.size_tuple()
+        return self.parent_type.size_tuple()
 
     def assignment_type(self) -> TensorValueTypeBase:
         return self
 
     def tensor_dtype(self) -> torch.dtype:
-        return self.base_type.tensor_dtype()
+        return self.parent_type.tensor_dtype()
 
     def is_intrinsically_quantized(self) -> bool:
-        return self.base_type.is_intrinsically_quantized()
+        return self.parent_type.is_intrinsically_quantized()
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, NamedTensorValueType):
@@ -491,17 +688,87 @@ class NamedTensorValueType(TensorValueTypeBase):
         return hash(self.typename)
 
 
-class ListType(TypeBase):
+class SequenceType(TypeBase):
+    """The basic sequence type. It has two forms: ListType and TupleType."""
+
+    @property
+    def is_sequence_type(self) -> bool:
+        return True
+
+
+class TupleType(SequenceType):
+    def __init__(self, element_types: Sequence[TypeBase], alias: Optional[str] = None):
+        super().__init__(f'Tuple[{", ".join(t.typename for t in element_types)}]', alias=alias)
+        self.element_types = tuple(element_types)
+
+    element_types: Tuple[TypeBase, ...]
+    """The element types of the tuple."""
+
+    @property
+    def is_tuple_type(self) -> bool:
+        return True
+
+
+class UniformSequenceType(SequenceType):
+    def __init__(self, typename: str, element_type: TypeBase, alias: Optional[str] = None):
+        super().__init__(typename, alias=alias)
+        self._element_type = element_type
+
+    _element_type: TypeBase
+    """The element type of the list."""
+
+    @property
+    def element_type(self) -> TypeBase:
+        return self._element_type
+
+    @property
+    def is_uniform_sequence_type(self) -> bool:
+        return True
+
+    @property
+    def is_object_type(self) -> bool:
+        return self.element_type.is_object_type
+
+    @property
+    def is_value_type(self) -> bool:
+        return self.element_type.is_value_type
+
+
+class ListType(UniformSequenceType):
     def __init__(self, element_type: TypeBase, alias: Optional[str] = None):
-        super().__init__(f'List[{element_type.typename}]', alias=alias)
-        self.element_type = element_type
+        typename = f'List[{element_type.typename}]'
+        super().__init__(typename, element_type, alias=alias)
+
+    @property
+    def is_list_type(self) -> bool:
+        return True
+
+
+class BatchedListType(UniformSequenceType):
+    def __init__(self, element_type: TypeBase, index_dtypes: Sequence[ObjectType], alias: Optional[str] = None):
+        typename = f'{element_type.typename}[{", ".join(t.typename for t in index_dtypes)}]'
+        super().__init__(typename, element_type, alias=alias)
+        self.index_dtypes = tuple(index_dtypes)
 
     element_type: TypeBase
     """The element type of the list."""
 
+    index_dtypes: Tuple[ObjectType, ...]
+    """The index types of the list."""
+
+    def ndim(self) -> int:
+        """The number of dimensions of the list."""
+        return len(self.index_dtypes)
+
     @property
-    def is_list_type(self):
+    def is_batched_list_type(self) -> bool:
         return True
+
+    def iter_element_type(self) -> TypeBase:
+        """Return the element type if we iterate over the list. Basically type(value[0])."""
+        if len(self.index_dtypes) == 1:
+            return self.element_type
+        return BatchedListType(self.element_type, index_dtypes=self.index_dtypes[1:])
 
 
 QINDEX = slice(None)
@@ -509,11 +776,11 @@ QINDEX = slice(None)
 
 
 class _Placeholder(object):
-    def __init__(self, name: str, dtype: Union[ObjectType, ValueType, 'FunctionType']):
+    def __init__(self, name: Union[str, 'StateObjectReference', 'StateObjectList'], dtype: Union[ObjectType, ValueType, 'FunctionType']):
         self.name = name
         self.dtype = dtype
 
-    name: str
+    name: Union[str, 'StateObjectReference', 'StateObjectList']
     """The name of the placeholder."""
 
     dtype: Union[ObjectType, ValueType, 'FunctionType']
@@ -529,6 +796,12 @@ class _Placeholder(object):
 
     __repr__ = jacinle.repr_from_str
 
+    def __eq__(self, other):
+        return self.name == other.name and self.dtype == other.dtype
+
+    def __hash__(self):
+        return hash((self.name, self.dtype))
+
 
 class Variable(_Placeholder):
     """The class representing a variable in a function."""
@@ -539,28 +812,56 @@ class Variable(_Placeholder):
     dtype: Union[ObjectType, ValueType, 'FunctionType']
     """The data type of the variable."""
 
+    scope: int = -1
+    """An additional integer indicating the scope identifier of the variable."""
+
     quantifier_flag: Optional[str] = None
     """Additional quantifier flag for the variable. This flag will be set by the parser indicating the quantifier scope of this variable.
     Currently this is only used in PDSketch for "quantified variable" in regression rules. """
+
+    def clone_with_scope(self, scope: int):
+        new_var = Variable(self.name, self.dtype)
+        new_var.scope = scope
+        new_var.quantifier_flag = self.quantifier_flag
+        return new_var
+
+    def set_scope(self, scope: int):
+        self.scope = scope
 
     def set_quantifier_flag(self, flag: str):
         self.quantifier_flag = flag
 
     def __str__(self):
-        if self.quantifier_flag is None:
-            return super().__str__()
-        else:
+        if self.scope > -1:
+            if self.quantifier_flag is not None:
+                return f'({self.quantifier_flag} {super().__str__()})@{self.scope}'
+            return super().__str__() + f'@{self.scope}'
+        if self.quantifier_flag is not None:
             return f'({self.quantifier_flag} {super().__str__()})'
+        return super().__str__()
 
 
 class ObjectConstant(_Placeholder):
     """The class representing a constant object in a DSL."""
 
-    name: str
+    name: Union[str, 'StateObjectReference', 'ListValue']
     """The name of the constant."""
 
-    dtype: Union[ObjectType, ValueType]
+    dtype: Union[ObjectType, ValueType, SequenceType]
     """The data type of the constant."""
+
+    def clone(self, dtype: Union[ObjectType, ValueType, SequenceType]):
+        from concepts.dsl.tensor_state import StateObjectReference, StateObjectList
+        from concepts.dsl.value import ListValue
+
+        if isinstance(self.name, str):
+            return ObjectConstant(self.name, dtype)
+        if isinstance(self.name, StateObjectReference):
+            return ObjectConstant(self.name.clone(dtype), dtype)
+        if isinstance(self.name, StateObjectList):
+            return ObjectConstant(self.name.clone(dtype), dtype)
+        if isinstance(self.name, ListValue):
+            raise DeprecationWarning('ListValue is deprecated as an ObjectConstant name.')
 
 
 class UnnamedPlaceholder(_Placeholder):

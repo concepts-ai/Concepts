@@ -1,0 +1,81 @@
+#!/usr/bin/env cdl-summary
+
+domain "crow-demo"
+
+# This is a processor pragma. Right now this "strict" annotation is doing nothing.
+# But in the future, we can use this syntax to specify configuration options for the parser.
+#!pragma strict
+
+# Use the "typedef" keyword to define new types.
+# There are two types of types: object types and non-object types.
+typedef robot: object
+typedef Object:  object
+
+# For non-object types, you can define their type as primitive types such as float32, int32, bool, or vector types.
+typedef pose:  vector[float32, 3]
+typedef color: vector[float32]
+
+# State variables: those are the variables that are used to represent the state of the world.
+# By definition, state variables are features associated with "objects" in the world (e.g., blocks, tables, robots, etc).
+# By default, any predicates whose arguments are all of object types are considered state variables.
+# But you can also explicitly declare them as state variables using the [[state]] pragma or [[state=False]] to exclude them from the state.
+
+# A feature can have different arities, such as 0-arity (e.g., is_happy), 1-arity (e.g., is_robot), 2-arity (e.g., is_on), etc.
+feature [[state]] is_happy() -> bool: ...
+feature [[state]] is_robot(r: robot): ...
+feature [[state]] is_block(b: Object) -> bool: ...
+feature [[state]] is_table(t: Object) -> bool: ...
+feature [[state]] holding(r: robot, x: Object) -> bool: ...
+feature [[state]] pose_of(b: Object) -> pose: ...
+
+# Functions: these functions can have non-object types as arguments, such as poses.
+def is_in_pose(b: Object, container: Object, p: pose, p_container: pose) -> bool
+def is_on_pose(b: Object, table: Object, p: pose, p_table: pose) -> bool
+
+# Derived functions: these are functions that are defined in terms of other functions.
+def is_on(b: Object, t: Object):
+  return is_on_pose(b, t, pose_of(b), pose_of(t))
+
+
+def is_on_2(b: Object, t: Object):
+  let condition = is_on_pose(b, t, pose_of(b), pose_of(t))
+  if condition:
+    if True:
+      return condition ^ True
+    else:
+      condition = condition ^ True
+    return condition
+  else:
+    return is_on_pose(b, t, pose_of(b), pose_of(t))
+
+def is_everything_on_table(t: Object):
+  return forall b: Object where: (
+    is_on(b, t)
+  )
+
+def is_something_on_table(t: Object):
+  return exists b: Object where: is_on(b, t)
+
+# You can also use fancier expression types such as XOR, or even quantifiers.
+def is_robot_xor_block(r: robot, b: Object):
+  return is_robot(r) ^ is_block(b)
+
+controller ctl_pickup(x: Object, from: Object)
+controller ctl_putdown(x: Object, on: Object)
+
+behavior pick_and_place(b: Object, to: Object):
+  goal: is_on(b, to)
+  body:
+    bind from: Object where:
+      is_on(b, from) and is_block(from)
+    let result = (
+      (
+        is_on(b, to) and
+        is_on(b, from)
+      ) and is_on(b, to)
+    )
+    let result2 = forall t: Object where: is_table(t) and is_on(from, t)
+    ctl_pickup(b, from)
+    ctl_putdown(b, to)
+  eff:
+    pose_of[b] = pose_of(to)

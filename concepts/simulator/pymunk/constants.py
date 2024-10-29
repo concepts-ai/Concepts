@@ -26,4 +26,5 @@ color_consts = argparse.Namespace()
 color_consts.RED = (255, 32, 32, 255)
 color_consts.BLACK = (0, 0, 0, 255)
 color_consts.BLUE = (32, 128, 255, 255)
+color_consts.GRAY = (128, 128, 128, 255)
 

@@ -1,0 +1,168 @@
+#!/usr/bin/env cdl-plan
+
+problem "crafting-world-v20230106-ptest-1"
+domain "../../../../concepts/benchmark/gridworld/crafting_world/crow_domains/crafting_world_station_agnostic.cdl"
+
+# cdl-plan crafting-world-problem-example.cdl --print-stat --is-goal-ordered=False --is-goal-serializable=True --always-commit-skeleton=True --min-search-depth=15
+#!pragma planner_is_goal_ordered=False
+#!pragma planner_is_goal_serializable=True
+#!pragma planner_always_commit_skeleton=True
+
+# For the iddfs_v1 planner, setting this to True enables faster planning.
+# For the priority_tree_v1 planner, setting this to False is "slightly" faster.
+#!pragma planner_enable_state_hash=True
+
+objects:
+  o1: Object
+  o2: Object
+  o3: Object
+  o4: Object
+  o5: Object
+  o6: Object
+  o7: Object
+  o8: Object
+  o9: Object
+  o10: Object
+  o11: Object
+  o12: Object
+  o13: Object
+  o14: Object
+  i1: Inventory
+  o15: Object
+  i2: Inventory
+  o16: Object
+  i3: Inventory
+  o17: Object
+  i4: Inventory
+  o18: Object
+  i5: Inventory
+  o19: Object
+  i6: Inventory
+  o20: Object
+  i7: Inventory
+  o21: Object
+  i8: Inventory
+  o22: Object
+  i9: Inventory
+  o23: Object
+  i10: Inventory
+  o24: Object
+  i11: Inventory
+  o25: Object
+  i12: Inventory
+  o26: Object
+  i13: Inventory
+  o27: Object
+  i14: Inventory
+  o28: Object
+  i15: Inventory
+  t1: Tile
+  t2: Tile
+  t3: Tile
+  t4: Tile
+  t5: Tile
+  t6: Tile
+  t7: Tile
+  t8: Tile
+  t9: Tile
+  t10: Tile
+  t11: Tile
+  t12: Tile
+  t13: Tile
+  t14: Tile
+  t15: Tile
+  t16: Tile
+  t17: Tile
+  t18: Tile
+  t19: Tile
+  t20: Tile
+  t21: Tile
+  t22: Tile
+  t23: Tile
+  t24: Tile
+  t25: Tile
+
+init:
+  object_of_type[o1, IronOreVein] = True
+  object_at[o1, t10] = True
+  object_of_type[o2, CoalOreVein] = True
+  object_at[o2, t12] = True
+  object_of_type[o3, CobblestoneStash] = True
+  object_at[o3, t2] = True
+  object_of_type[o4, Tree] = True
+  object_at[o4, t17] = True
+  object_of_type[o5, Chicken] = True
+  object_at[o5, t6] = True
+  object_of_type[o6, Sheep] = True
+  object_at[o6, t1] = True
+  object_of_type[o7, PotatoPlant] = True
+  object_at[o7, t23] = True
+  object_of_type[o8, BeetrootCrop] = True
+  object_at[o8, t8] = True
+  object_of_type[o9, GoldOreVein] = True
+  object_at[o9, t14] = True
+  object_of_type[o10, SugarCanePlant] = True
+  object_at[o10, t19] = True
+  object_of_type[o11, WorkStation] = True
+  object_at[o11, t9] = True
+  object_of_type[o12, Axe] = True
+  object_at[o12, t19] = True
+  object_of_type[o13, Pickaxe] = True
+  object_at[o13, t6] = True
+  object_of_type[o14, Hypothetical] = True
+  inventory_empty[i1] = True
+  object_of_type[o15, Hypothetical] = True
+  inventory_empty[i2] = True
+  object_of_type[o16, Hypothetical] = True
+  inventory_empty[i3] = True
+  object_of_type[o17, Hypothetical] = True
+  inventory_empty[i4] = True
+  object_of_type[o18, Hypothetical] = True
+  inventory_empty[i5] = True
+  object_of_type[o19, Hypothetical] = True
+  inventory_empty[i6] = True
+  object_of_type[o20, Hypothetical] = True
+  inventory_empty[i7] = True
+  object_of_type[o21, Hypothetical] = True
+  inventory_empty[i8] = True
+  object_of_type[o22, Hypothetical] = True
+  inventory_empty[i9] = True
+  object_of_type[o23, Hypothetical] = True
+  inventory_empty[i10] = True
+  object_of_type[o24, Hypothetical] = True
+  inventory_empty[i11] = True
+  object_of_type[o25, Hypothetical] = True
+  inventory_empty[i12] = True
+  object_of_type[o26, Hypothetical] = True
+  inventory_empty[i13] = True
+  object_of_type[o27, Hypothetical] = True
+  inventory_empty[i14] = True
+  object_of_type[o28, Hypothetical] = True
+  inventory_empty[i15] = True
+  agent_at[t1] = True
+
+goal:
+  symbol x0 = exists i: Inventory where: (
+      exists o: Object where: (
+          inventory_holding(i, o) and object_of_type(o, Boat)
+      )
+  )
+
+  symbol x1 = exists i: Inventory where: (
+      exists o: Object where: (
+          inventory_holding(i, o) and object_of_type(o, CookedPotato)
+      )
+  )
+
+  symbol x2 = exists i: Inventory where: (
+      exists o: Object where: (
+          inventory_holding(i, o) and object_of_type(o, Beetroot)
+      )
+  )
+
+  symbol x3 = exists i: Inventory where: (
+      exists o: Object where: (
+          inventory_holding(i, o) and object_of_type(o, Sword)
+      )
+  )
+  x0 and x1 and x2 and x3

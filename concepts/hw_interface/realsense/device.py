@@ -16,7 +16,12 @@ https://github.com/IntelRealSense/librealsense/issues/8388#issuecomment-78239544
 from typing import Dict, List, Optional, Tuple, ClassVar, Callable
 
 import numpy as np
-import pyrealsense2 as rs
+
+try:
+    import pyrealsense2 as rs
+except ImportError:
+    import unittest.mock
+    rs = unittest.mock.Mock()
 
 __all__ = ['RealSenseDevice', 'start_pipelines', 'stop_pipelines']
 
@@ -36,24 +41,71 @@ _NAME_TO_STREAM_CONFIGURATIONS: Dict[str, List[Tuple]] = {
 }
 
 
-class RealSenseDevice(object):
-    align: ClassVar[Callable] = rs.align(rs.stream.color)
+class RealSenseInterface(object):
+    """Since we have multiple RealSense implementations, we define an interface here."""
+
+    def get_serial_number(self) -> str:
+        raise NotImplementedError()
+
+    def get_rgbd_image(self, format: str = 'rgb') -> Tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError()
+
+    def get_color_intrinsics(self) -> Tuple[np.ndarray]:
+        raise NotImplementedError()
+
+    def get_depth_intrinsics(self) -> Tuple[np.ndarray]:
+        raise NotImplementedError()
+
+
+class RealSenseDevice(RealSenseInterface):
     ctx: ClassVar[rs.context] = rs.context()
 
-    def __init__(self, name: str, serial_number: str):
+    def __init__(self, name: str, serial_number: str, align_to: str = 'color'):
         self.name = name
         self.serial_number = serial_number
 
+        if align_to == 'color':
+            self.align = rs.align(rs.stream.color)
+        elif align_to == 'depth':
+            self.align = rs.align(rs.stream.depth)
+        else:
+            raise ValueError(f"Invalid align_to value: {align_to}")
         self.pipeline: Optional[rs.pipeline] = None
         self.registered_points: List[Tuple[float, float]] = list()
         self.color_intrinsics = None
         self.depth_intrinsics = None
+
+    def get_serial_number(self) -> str:
+        return self.serial_number
+
+    def get_rgbd_image(self, format: str = 'rgb') -> Tuple[np.ndarray, np.ndarray]:
+        rgb, depth = self.capture_images()
+        if format == 'bgr':
+            return rgb, depth
+        elif format == 'rgb':
+            return rgb[..., ::-1], depth
+        else:
+            raise ValueError(f'Invalid format: {format}.')
+
+    def get_color_intrinsics(self) -> np.ndarray:
+        return self.color_intrinsics
+
+    def get_depth_intrinsics(self) -> np.ndarray:
+        return self.depth_intrinsics
 
     @classmethod
     def from_rs_device(cls, dev: rs.device) -> 'RealSenseDevice':
         name = dev.get_info(rs.camera_info.name)
         serial_number = dev.get_info(rs.camera_info.serial_number)
         return cls(name, serial_number)
+
+    @classmethod
+    def from_serial_number(cls, serial_number: str) -> 'RealSenseDevice':
+        devices = cls.find_devices()
+        for device in devices:
+            if device.serial_number == serial_number:
+                return device
+        raise ValueError(f"Device with serial number {serial_number} not found!")
 
     @classmethod
     def find_devices(cls, device_filter: str = "") -> List['RealSenseDevice']:
@@ -78,10 +130,11 @@ class RealSenseDevice(object):
 
     @property
     def stream_configurations(self) -> List[Tuple]:
-        if self.name not in _NAME_TO_STREAM_CONFIGURATIONS:
+        configs = _NAME_TO_STREAM_CONFIGURATIONS
+        if self.name not in configs:
             raise RuntimeError(f"Configuration not specified for {self.name}")
 
-        return _NAME_TO_STREAM_CONFIGURATIONS[self.name]
+        return configs[self.name]
 
     def start_pipeline(self) -> None:
         """Start RealSense pipeline"""
@@ -175,7 +228,7 @@ def stop_pipelines(devices: List[RealSenseDevice]) -> None:
         device.stop_pipeline()
 
 
-def get_intrinsics_matrix(intr) -> np.ndarray:
+def get_intrinsics_matrix(intr: rs.intrinsics) -> np.ndarray:
     fx = float(intr.fx)
     fy = float(intr.fy)
     ppx = float(intr.ppx)
@@ -187,3 +240,19 @@ def get_intrinsics_matrix(intr) -> np.ndarray:
         [0.0, 0.0, 1.0]
     ])
 
+
+def get_depth_visualization(depth_image: np.ndarray) -> np.ndarray:
+    """Get depth visualization."""
+    import cv2
+
+    depth_colormap = cv2.applyColorMap(
+        cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
+    )
+    return depth_colormap
+
+
+def get_concat_rgbd_visualization(color_image: np.ndarray, depth_image: np.ndarray) -> np.ndarray:
+    """Get concatenated RGB-D visualization in a row."""
+    depth_colormap = get_depth_visualization(depth_image)
+    images = np.hstack((color_image, depth_colormap))
+    return images

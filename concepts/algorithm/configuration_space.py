@@ -132,6 +132,10 @@ class BoxConfigurationSpace(ConfigurationSpace):
     def gen_path(self, config1: tuple, config2: tuple):
         return self.gen_path_l1(config1, config2)
 
+    def gen_interpolated_path(self, config1: tuple, config2: tuple, nr_steps: int):
+        # use linspace to interpolate between config1 and config2
+        return np.array([np.linspace(config1[i], config2[i], nr_steps) for i in range(len(config1))]).T
+
 
 class ConstrainedConfigurationSpace(ProxyConfigurationSpace):
     def __init__(self, cspace, constrain_config_func=None, extra_validate_config_func=None):

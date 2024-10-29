@@ -1,0 +1,100 @@
+(define
+  (problem h1-pick-blocker)
+  (:domain pick-place-hierarchy)
+  (:objects
+    world - qr::world-type
+    workspace - workspace-type
+    table - table-type
+
+    table-lm - cube-type
+    table-lh - cube-type
+    table-rm - cube-type
+    table-rh - cube-type
+
+    panda-base - cube-type
+    panda - panda-type
+
+    cube1 - cube-type
+    cube2 - cube-type
+    cube3 - cube-type
+  )
+  (:init
+    ;; The "base" table
+    (weld world::world workspace (1, 0, -0.3, 0, 0, 0))
+    (weld world::world table (0, 0, -0.301, 0, 0, 0))
+
+    (weld world::world table-lm (0.5, -0.5, -0.025, 0, 0, 0))
+    (urdf::prop     table-lm "DIM" (0.5, 0.5, 0.05))
+    (urdf::prop     table-lm "HALF" (0.25, 0.25, 0.025))
+    (urdf::prop     table-lm "MASS" 1.0)
+    (urdf::prop     table-lm "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg table-lm "rgba" (0.2, 0.2, 0.2, 1))
+
+    (weld world::world table-lh (0.5, -0.75, 0.3, 0, 0, 0))
+    (urdf::prop     table-lh "DIM" (0.5, 0.5, 0.05))
+    (urdf::prop     table-lh "HALF" (0.25, 0.25, 0.025))
+    (urdf::prop     table-lh "MASS" 1.0)
+    (urdf::prop     table-lh "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg table-lh "rgba" (0.2, 0.2, 0.2, 1))
+
+    (weld world::world table-rm (0.5, +0.5, -0.025, 0, 0, 0))
+    (urdf::prop     table-rm "DIM" (0.5, 0.5, 0.05))
+    (urdf::prop     table-rm "HALF" (0.25, 0.25, 0.025))
+    (urdf::prop     table-rm "MASS" 1.0)
+    (urdf::prop     table-rm "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg table-rm "rgba" (0.2, 0.2, 0.2, 1))
+
+    (weld world::world table-rh (0.5, +0.75, 0.3, 0, 0, 0))
+    (urdf::prop     table-rh "DIM" (0.5, 0.5, 0.05))
+    (urdf::prop     table-rh "HALF" (0.25, 0.25, 0.025))
+    (urdf::prop     table-rh "MASS" 1.0)
+    (urdf::prop     table-rh "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg table-rh "rgba" (0.2, 0.2, 0.2, 1))
+
+    (weld world::world panda-base (-0.05, 0, -0.15, 0, 0, 0))
+    (urdf::prop     panda-base "DIM" (0.25, 0.5, 0.3))
+    (urdf::prop     panda-base "HALF" (0.125, 0.25, 0.15))
+    (urdf::prop     panda-base "MASS" 1.0)
+    (urdf::prop     panda-base "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg panda-base "rgba" (0.2, 0.2, 0.2, 1))
+
+    ;; PANDA_JOINT_HOMES = np.array([-0.45105, -0.38886, 0.45533, -2.19163, 0.13169, 1.81720, 0.51563])
+    (weld world::world panda (0, 0, 0, 0, 0, 0))
+    (joint-conf panda::panda_joint1 -0.45105)
+    (joint-conf panda::panda_joint2 -0.38886)
+    (joint-conf panda::panda_joint3 0.45533)
+    (joint-conf panda::panda_joint4 -2.19163)
+    (joint-conf panda::panda_joint5 0.13169)
+    (joint-conf panda::panda_joint6 1.81720)
+    (joint-conf panda::panda_joint7 0.51563)
+
+    (body-pose      cube1 (0.5, +0.3, 0.025, 0, 0, 0))
+    (urdf::prop     cube1 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube1 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube1 "MASS" 0.2)
+    (urdf::prop     cube1 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube1 "rgba" (1.0, 0.34, 0.34, 1.0))
+
+    (body-pose      cube2 (0.5, -0.3, 0.025, 0, 0, 0))
+    (urdf::prop     cube2 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube2 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube2 "MASS" 0.2)
+    (urdf::prop     cube2 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube2 "rgba" (0.34, 1.0, 0.34, 1.0))
+
+    (body-pose      cube3 (0.5, -0.3, 0.075, 0, 0, 0))
+    (urdf::prop     cube3 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube3 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube3 "MASS" 0.2)
+    (urdf::prop     cube3 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube3 "rgba" (0.34, 0.34, 1.0, 1.0))
+
+    (sim::camera-distance 1.5)
+    (sim::camera-yaw 90)
+    (sim::camera-pitch -25)
+    (sim::camera-look-at (0, 0, 0))
+  )
+  (:goal (and
+    (on cube1 cube2)
+  ))
+)

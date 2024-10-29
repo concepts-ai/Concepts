@@ -5,7 +5,7 @@
 # Email  : maojiayuan@gmail.com
 # Date   : 12/19/2021
 #
-# This file is part of NSCL-PyTorch.
+# This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
 # Copyright 2017-present, Facebook, Inc.

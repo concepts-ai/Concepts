@@ -42,7 +42,7 @@ class ParserBase(object):
         """
         raise NotImplementedError()
 
-    def parse_expression(self, string: str) -> Expression:
+    def parse_expression(self, string: str, **kwargs) -> Expression:
         """Parse an expression from a string.
 
         Args:
