@@ -454,7 +454,7 @@ class CrowExecutionDefaultVisitor(ExpressionVisitor):
         else:
             # dynamic predicate is exactly the same thing as a pre-defined external function.
             # only supports external functions with a single return value.
-            return self.forward_external_function(function.name, argument_values, return_type, expression=expr)
+            return self._rename_derived_function_application(self.forward_external_function(function.name, argument_values, return_type, expression=expr), function.arguments, expr.arguments, argument_values)
 
     def _rename_derived_function_application(self, rv: TensorValue, function_argument_variables, outer_arguments, argument_values):
         if not isinstance(rv, TensorValue):

@@ -18,9 +18,10 @@ import open3d as o3d
 import pybullet as p
 
 from jacinle.utils.printing import indent_text
-from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate, rotate_vector_batch
+from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate, rotate_vector_batch, pos_quat2mat
 from concepts.math.frame_utils_xyzw import compose_transformation
 from concepts.simulator.pybullet.camera import CameraConfig
+from concepts.utils.typing_utils import Trimesh
 
 __all__ = [
     'BodyState', 'JointState', 'LinkState', 'DebugCameraState',
@@ -179,7 +180,7 @@ class VisualShapeData(collections.namedtuple('_VisualShapeInfo', [
     'local_pos',
     'local_orn',
     'rgba_color',
-    'texture_unique_id',
+    # 'texture_unique_id',
     'world_pos',  # the position relative to the world frame
     'world_orn',  # the orientation relative to the world frame
 ])):
@@ -820,6 +821,8 @@ class BulletWorld(object):
             vel = p.getBaseVelocity(body_id, physicsClientId=self.client_id)
             return LinkState(np.array(state[0]), np.array(state[1]), np.array(vel[0]), np.array(vel[1]))
         state = p.getLinkState(body_id, link_id, computeForwardKinematics=fk, computeLinkVelocity=fk, physicsClientId=self.client_id)
+        if not fk:
+            return LinkState(np.array(state[0]), np.array(state[1]), np.array([0., 0., 0.]), np.array([0., 0., 0.]))
         return LinkState(np.array(state[0]), np.array(state[1]), np.array(state[6]), np.array(state[7]))
 
     def get_link_state(self, link_name: str, fk=False) -> LinkState:
@@ -847,14 +850,13 @@ class BulletWorld(object):
 
     def get_visual_shape_data_by_id(self, body_id: int) -> List[VisualShapeData]:
         output_data = list()
-        for i in range(-1, p.getNumJoints(body_id, physicsClientId=self.client_id)):
+        data_list = p.getVisualShapeData(body_id, physicsClientId=self.client_id)
+        for shape_data in data_list:
+            i = shape_data[1]
             link_state = self.get_link_state_by_id(body_id, i, fk=True)
-
-            data_list = p.getVisualShapeData(body_id, i, physicsClientId=self.client_id)
-            for shape_data in data_list:
-                world_pos, world_orn = compose_transformation(link_state.position, link_state.orientation, shape_data[5], shape_data[6])
-                # world_pos, world_orn = p.multiplyTransforms(link_state.position, link_state.orientation, shape_data[5], shape_data[6], physicsClientId=self.client_id)
-                output_data.append(VisualShapeData(*shape_data, world_pos, world_orn))
+            world_pos, world_orn = compose_transformation(link_state.position, link_state.orientation, shape_data[5], shape_data[6])
+            # world_pos, world_orn = p.multiplyTransforms(link_state.position, link_state.orientation, shape_data[5], shape_data[6], physicsClientId=self.client_id)
+            output_data.append(VisualShapeData(*shape_data[:8], world_pos, world_orn))
         return output_data
 
     def get_free_joints(self, body_id: int) -> List[int]:
@@ -1023,12 +1025,17 @@ class BulletWorld(object):
 
         return color, depth, segm
 
-    def get_pointcloud(self, body_id: int, points_per_geom: int = 1000, zero_center: bool = True) -> np.ndarray:
+    def get_pointcloud(self, body_id: int, points_per_geom: int = 1000, zero_center: bool = True, use_visual_shape: bool = False) -> np.ndarray:
         """Get the point cloud of a body."""
 
         all_pcds = list()
 
         body_state = self.get_body_state_by_id(body_id)
+        if not use_visual_shape:
+            shapes = self.get_collision_shape_data_by_id(body_id)
+        else:
+            shapes = self.get_visual_shape_data_by_id(body_id)
+
         for shape_info in self.get_collision_shape_data_by_id(body_id):
             if shape_info.shape_type == p.GEOM_BOX:
                 pcd = self.get_pointcloud_box(shape_info.dimensions, points_per_geom)
@@ -1077,7 +1084,7 @@ class BulletWorld(object):
     def transform_pcd(self, raw_pcd, pos, quat_xyzw):
         return rotate_vector_batch(raw_pcd, quat_xyzw) + pos
 
-    def get_mesh(self, body_id: int, zero_center: bool = True, verbose: bool = False, mesh_filename: Optional[str] = None, mesh_scale: float = 1.0) -> o3d.geometry.TriangleMesh:
+    def get_mesh(self, body_id: int, zero_center: bool = True, verbose: bool = False, mesh_filename: Optional[str] = None, mesh_scale: float = 1.0, use_visual_shape: bool = False) -> o3d.geometry.TriangleMesh:
         """Get the point cloud of a body.
 
         Args:
@@ -1090,7 +1097,13 @@ class BulletWorld(object):
 
         base_mesh = o3d.geometry.TriangleMesh()
         body_state = self.get_body_state_by_id(body_id)
-        for shape_info in self.get_collision_shape_data_by_id(body_id):
+
+        if not use_visual_shape:
+            shapes = self.get_collision_shape_data_by_id(body_id)
+        else:
+            shapes = self.get_visual_shape_data_by_id(body_id)
+
+        for shape_info in shapes:
             if shape_info.shape_type == p.GEOM_BOX:
                 mesh = self.get_mesh_box(shape_info.dimensions)
             # elif shape_info.shape_type == client.p.GEOM_SPHERE:
@@ -1170,3 +1183,75 @@ class BulletWorld(object):
             orn = data.world_orn
             filenames_and_transforms.append((mesh_filename, scale, pos, orn))
         return filenames_and_transforms
+
+    def get_trimesh(self, body_id: int, zero_center: bool = False, verbose: bool = False, mesh_filename: Optional[str] = None, mesh_scale: float = 1.0, use_visual_shape: bool = False) -> List[Trimesh]:
+        """Get the Trimesh triangle mesh of a body.
+
+        Args:
+            body_id: the ID of the body.
+            zero_center: whether to zero-center the mesh (i.e., move the center of the mesh to the origin).
+            verbose: whether to print debug information.
+            mesh_filename: the filename of the mesh. This should be provided if the body has a mesh shape but we can't get it from the collision shape data.
+            mesh_scale: the scale of the mesh. This should be provided if the body has a mesh shape but we can't get it from the collision shape data.
+        """
+
+        try:
+            import trimesh
+        except ImportError:
+            raise ImportError('trimesh is required for this function.')
+
+        meshes = list()
+        body_state = self.get_body_state_by_id(body_id)
+
+        if not use_visual_shape:
+            shapes = self.get_collision_shape_data_by_id(body_id)
+        else:
+            shapes = self.get_visual_shape_data_by_id(body_id)
+
+        for shape_info in shapes:
+            if shape_info.shape_type == p.GEOM_BOX:
+                mesh = trimesh.creation.box(extents=shape_info.dimensions)
+            elif shape_info.shape_type == p.GEOM_SPHERE:
+                mesh = trimesh.creation.icosphere(subdivisions=3, radius=shape_info.dimensions[0])
+            elif shape_info.shape_type == p.GEOM_CYLINDER:
+                mesh = trimesh.creation.cylinder(radius=shape_info.dimensions[0], height=shape_info.dimensions[1])
+            elif shape_info.shape_type == p.GEOM_CAPSULE:
+                mesh = trimesh.creation.capsule(radius=shape_info.dimensions[0], height=shape_info.dimensions[1])
+            elif shape_info.shape_type == p.GEOM_MESH:
+                if mesh_filename is not None:
+                    mesh = self.get_trimesh_mesh(mesh_filename, mesh_scale)
+                else:
+                    mesh = self.get_trimesh_mesh(shape_info.filename, shape_info.dimensions[0])
+            else:
+                raise ValueError(f'Unsupported shape type: {shape_info.shape_type}.')
+
+            if zero_center:
+                pos = shape_info.world_pos - body_state.pos
+                orn = quat_mul(quat_conjugate(body_state.quat_xyzw), shape_info.world_orn)
+            else:
+                pos, orn = shape_info.world_pos, shape_info.world_orn
+
+            if verbose:
+                print(shape_info)
+                print('Zero-center:', zero_center)
+                print(f'Transforming the mesh: pos: {pos}, orn: {orn}')
+
+            mesh = self.transform_trimesh(mesh, pos, orn)
+            meshes.append(mesh)
+
+        return meshes
+
+    @_geometry_cache(type_id=1, geom_name_template='trimesh_{mesh_file}_{mesh_scale}')
+    def get_trimesh_mesh(self, mesh_file, mesh_scale) -> Trimesh:
+        """Get a triangle mesh for a mesh primitive."""
+        import trimesh
+
+        mesh = trimesh.load(mesh_file.decode('utf-8'))
+        mesh.apply_scale(mesh_scale)
+        return mesh
+
+    def transform_trimesh(self, mesh: Trimesh, pos, quat_xyzw):
+        mat = pos_quat2mat(pos, quat_xyzw)
+        mesh.apply_transform(mat)
+        return mesh
+

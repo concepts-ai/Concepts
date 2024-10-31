@@ -171,7 +171,7 @@ class CrowPythonFunctionRef(object):
             if self.auto_broadcast and auto_broadcast:
                 argument_values = expand_argument_values(argument_values)
 
-        argument_values_flat = argument_values
+        argument_values_flat = list(argument_values)
         if self.unwrap_values:
             argument_values_flat = [v.tensor if isinstance(v, TensorValue) else v for v in argument_values_flat]
             if not self.support_batch:
