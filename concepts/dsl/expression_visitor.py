@@ -59,6 +59,8 @@ class ExpressionVisitor(object):
             return self.visit_generalized_quantification_expression(expr)
         elif isinstance(expr, E.FindAllExpression):
             return self.visit_find_all_expression(expr)
+        elif isinstance(expr, E.FindOneExpression):
+            return self.visit_find_one_expression(expr)
         elif isinstance(expr, E.ObjectCompareExpression):
             return self.visit_object_compare_expression(expr)
         elif isinstance(expr, E.ValueCompareExpression):
