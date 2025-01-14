@@ -237,7 +237,7 @@ def _apply_assignments_with_simulation(
             for i, c in enumerate(new_constraints):
                 if isinstance(c.function, SimulationFluentConstraintFunction):
                     function: SimulationFluentConstraintFunction = c.function
-                    if function.action_index == next_action_index:
+                    if function.state_index == next_action_index:
                         if isinstance(c.rv, TensorValue):
                             if c.rv.dtype != BOOL:
                                 raise NotImplementedError('Only bool is supported for simulation constraints.')

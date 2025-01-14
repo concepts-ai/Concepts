@@ -1,0 +1,35 @@
+#!/usr/bin/env cdl-plan
+
+problem "dirty-feature-demo"
+domain "__empty__"
+
+#!pragma planner_algo="priority_tree_v1"
+#!pragma load_implementation("dirty-feature-implementations.py")
+
+typedef Object: object
+typedef ObjectList: Object[]
+
+feature is_good(x: Object) -> bool
+def is_okay(x: Object) -> bool
+
+controller print(x: Object)
+
+objects:
+  A, B, C: Object
+
+init:
+  is_good[A] = True
+
+behavior do_okay(x: Object):
+  goal: is_okay(x)
+  body:
+    print(x)
+  eff:
+    is_okay[x] = True  # This is manually setting a function to be True.
+
+behavior __goal__():
+  body:
+    let xl = findall x: Object: not is_good(x)
+    foreach x in xl:
+      achieve is_okay(x)
+

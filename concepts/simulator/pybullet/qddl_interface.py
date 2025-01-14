@@ -41,6 +41,11 @@ class QDDLSceneMetainfo(object):
         return self.objects[object_name].id
 
 
+@dataclass
+class QDDLProblemMetainfo(object):
+    goal: str
+
+
 class PyBulletQDDLInterface(object):
     """Load a scene from a QDDL problem file."""
 
@@ -48,6 +53,10 @@ class PyBulletQDDLInterface(object):
         self.client = client
         self.package_map = package_map or dict()
         self.package_map['concepts'] = self.client.assets_root
+
+    def load(self, domain_file: str, problem_file: str) -> Tuple[QDDLSceneMetainfo, QDDLProblemMetainfo]:
+        _, problem = self.load_qddl(domain_file, problem_file)
+        return self._load_scene(problem, self.package_map), self._load_problem_metainfo(problem)
 
     def load_qddl(self, domain_file: str, problem_file: str) -> Tuple[C.PDDLDomain, C.PDDLProblem]:
         return load_qddl(domain_file, problem_file)
@@ -59,6 +68,14 @@ class PyBulletQDDLInterface(object):
     def load_scene_string(self, domain_string, problem_string) -> QDDLSceneMetainfo:
         _, problem = load_qddl_string(domain_string, problem_string)
         return self._load_scene(problem, self.package_map)
+
+    def _load_problem_metainfo(self, problem) -> QDDLProblemMetainfo:
+        goals = list()
+        for x in problem.conjunctive_goal:
+            name = x.predicate.name
+            args = [y.name for y in x.arguments]
+            goals.append(f"{name}({', '.join(args)})")
+        return QDDLProblemMetainfo(goal=" and ".join(goals))
 
     def _load_scene(self, problem, package_map: Dict[str, str]) -> QDDLSceneMetainfo:
         objects = dict()

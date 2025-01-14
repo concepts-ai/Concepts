@@ -1,0 +1,16 @@
+(define
+  (domain tabletop)
+
+  (:object-types
+    (panda-type     "package://concepts/robots/franka_description/robots/panda_arm_hand.urdf")
+    (workspace-type "package://concepts/basic/plane/workspace.urdf")
+    (table-type     "package://concepts/basic/plane/plane.urdf")
+    (cube-type      "package://concepts/basic/box/box-template.urdf")
+    (box-type       "package://concepts/basic/container/container-template.urdf")
+  )
+
+  (:predicates
+    (in ?obj ?region)
+    (on ?obj ?obj)
+  )
+)

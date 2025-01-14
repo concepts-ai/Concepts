@@ -13,6 +13,7 @@
 The following algorithms and data structures have a generic interface. The are not designed specifically for a specific robot.
 """
 
+import jacinle
 import numpy as np
 import numpy.random as npr
 
@@ -206,24 +207,26 @@ def birrt(
     swapped = False
 
     if verbose:
-        print(f'birrt::input check: {pspace.validate_config(start_state)=}, {pspace.validate_config(goal_state)=}')
+        jacinle.lf_indent_print(f'birrt::input check: {pspace.validate_config(start_state)=}, {pspace.validate_config(goal_state)=}')
 
     if not pspace.validate_config(start_state) or not pspace.validate_config(goal_state):
+        if not pspace.validate_config(start_state):
+            import warnings
+            warnings.warn('The start state is not valid.')
+            import ipdb; ipdb.set_trace()
+
         return None, (rrt_start, rrt_goal)
-    #     import pybulelt as p
-    #     p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
-    #     import ipdb; ipdb.set_trace()
 
     if True:
         # Try to directly connecting the starting state and the goal state.
         success, next_config, _ = pspace.try_extend_path(start_state, goal_state)
         if success:
             if verbose:
-                print('birrt::shortcut: Directly connected the start and goal states.')
+                jacinle.lf_indent_print('birrt::shortcut: Directly connected the start and goal states.')
             rrt_start.extend(rrt_start.nearest(goal_state), goal_state)
             return smooth_path(pspace, [start_state, goal_state], 0, use_fine_path=smooth_fine_path), (rrt_start, rrt_goal)
 
-    for i in range(nr_iterations):
+    for i in jacinle.tqdm(nr_iterations, desc='birrt::running', disable=not verbose):
         next_config = pspace.sample()
 
         node_start = rrt_start.nearest(next_config)

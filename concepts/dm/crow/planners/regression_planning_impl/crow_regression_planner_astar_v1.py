@@ -27,7 +27,7 @@ from concepts.dm.crow.behavior import CrowBehaviorOrderingSuite
 from concepts.dm.crow.behavior_utils import match_applicable_behaviors, ApplicableBehaviorItem, execute_object_bind
 
 from concepts.dm.crow.planners.regression_planning import CrowPlanningResult, CrowRegressionPlanner
-from concepts.dm.crow.planners.regression_utils import canonize_bounded_variables
+from concepts.dm.crow.planners.regression_utils import canonicalize_bounded_variables
 from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_dfs_v1_utils import execute_behavior_effect
 from concepts.dm.crow.csp_solver.csp_utils import csp_ground_action_list
 
@@ -326,7 +326,7 @@ class CrowRegressionPlannerAStarv1(CrowRegressionPlanner):
 
             if isinstance(stmt, CrowAchieveExpression) or isinstance(stmt, CrowAssertExpression):
                 expr = stmt.goal if isinstance(stmt, CrowAchieveExpression) else stmt.bool_expr
-                rv = self.executor.execute(expr, state=planning_state.state, bounded_variables=canonize_bounded_variables(planning_state.scopes, scope_id), optimistic_execution=True)
+                rv = self.executor.execute(expr, state=planning_state.state, bounded_variables=canonicalize_bounded_variables(planning_state.scopes, scope_id), optimistic_execution=True)
                 rv = rv.item()
                 if isinstance(rv, OptimisticValue):
                     rv = False
@@ -362,7 +362,7 @@ class CrowRegressionPlannerAStarv1(CrowRegressionPlanner):
                 new_state = planning_state.clone(program=middle)
                 self.bfs_add_queue(planning_state.clone(program=middle, right_statements=(_ScopedStatement2(stmt, scope_id, expanded_state=new_state),) + planning_state.right_statements))
             else:
-                rv, csp = self.evaluate(stmt.goal, state=planning_state.state, csp=planning_state.csp, bounded_variables=canonize_bounded_variables(planning_state.scopes, scope_id))
+                rv, csp = self.evaluate(stmt.goal, state=planning_state.state, csp=planning_state.csp, bounded_variables=canonicalize_bounded_variables(planning_state.scopes, scope_id))
                 if isinstance(rv, OptimisticValue):
                     # If the value is optimistic, we will add a constraint to the CSP and continue the search.
                     # But we also need to consider the case where the optimistic value is False, so we do not stop the branching here (no return).
@@ -395,7 +395,7 @@ class CrowRegressionPlannerAStarv1(CrowRegressionPlanner):
                 #     print('Already expanded. {{{', '-' * 60)
 
                 # TODO(Jiayuan Mao @ 2024/03/27): think about which state should these actions be grounded on and how we should handle the CSP.
-                argument_values = [self.executor.execute(x, state=planning_state.state, bounded_variables=canonize_bounded_variables(planning_state.scopes, scope_id)) for x in stmt.arguments]
+                argument_values = [self.executor.execute(x, state=planning_state.state, bounded_variables=canonicalize_bounded_variables(planning_state.scopes, scope_id)) for x in stmt.arguments]
                 action_matching = ApplicableBehaviorItem(stmt.behavior, {k.name: v for k, v in zip(stmt.behavior.arguments, argument_values)})
                 self._bfs_expand_inner_action(expanded_planning_state, expanded_planning_state.program, action_matching, scope_id, prefix_expanded_planning_state=planning_state, first_time_expand=first_time_expand)
                 # if not first_time_expand:
@@ -481,14 +481,14 @@ class CrowRegressionPlannerAStarv1(CrowRegressionPlanner):
         """Expand the tree by refining a particular primitive statement."""
         if isinstance(stmt, CrowControllerApplicationExpression):
             new_csp = state.csp.clone()
-            argument_values = [self.evaluate(x, state=state.state, csp=new_csp, bounded_variables=canonize_bounded_variables(state.scopes, scope_id), clone_csp=False)[0] for x in stmt.arguments]
+            argument_values = [self.evaluate(x, state=state.state, csp=new_csp, bounded_variables=canonicalize_bounded_variables(state.scopes, scope_id), clone_csp=False)[0] for x in stmt.arguments]
             for i, argv in enumerate(argument_values):
                 if isinstance(argv, StateObjectReference):
                     argument_values[i] = argv.name
             self.bfs_add_queue(state.clone(program=None, left_statements=state.left_statements + (CrowControllerApplier(stmt.controller, argument_values),), csp=new_csp))
         elif isinstance(stmt, CrowBindExpression):
             if stmt.is_object_bind:
-                for new_scope in execute_object_bind(self.executor, stmt, state.state, canonize_bounded_variables(state.scopes, scope_id)):
+                for new_scope in execute_object_bind(self.executor, stmt, state.state, canonicalize_bounded_variables(state.scopes, scope_id)):
                     new_scopes = state.scopes.copy()
                     new_scopes[scope_id] = new_scope
                     self.bfs_add_queue(state.clone(program=None, scopes=new_scopes))
@@ -497,16 +497,16 @@ class CrowRegressionPlannerAStarv1(CrowRegressionPlanner):
                 new_scopes = state.scopes.copy()
                 for var in stmt.variables:
                     new_scopes[scope_id][var] = TensorValue.from_optimistic_value(new_csp.new_var(var.dtype, wrap=True))
-                rv, new_csp = self.evaluate(stmt.goal, state=state.state, csp=new_csp, bounded_variables=canonize_bounded_variables(new_scopes, scope_id))
+                rv, new_csp = self.evaluate(stmt.goal, state=state.state, csp=new_csp, bounded_variables=canonicalize_bounded_variables(new_scopes, scope_id))
                 self.bfs_add_queue(state.clone(program=None, scopes=new_scopes, csp=new_csp.add_equal_constraint(rv, True)))
         elif isinstance(stmt, CrowRuntimeAssignmentExpression):
-            rv, new_csp = self.evaluate(stmt.value, state=state.state, csp=state.csp, bounded_variables=canonize_bounded_variables(state.scopes, scope_id))
+            rv, new_csp = self.evaluate(stmt.value, state=state.state, csp=state.csp, bounded_variables=canonicalize_bounded_variables(state.scopes, scope_id))
             new_scopes = state.scopes.copy()
             new_scopes[scope_id] = state.scopes[scope_id].copy()
             new_scopes[scope_id][stmt.variable.name] = rv
             self.bfs_add_queue(state.clone(program=None, scopes=new_scopes, csp=new_csp))
         elif isinstance(stmt, CrowAssertExpression):
-            rv, new_csp = self.evaluate(stmt.bool_expr, state=state.state, csp=state.csp, bounded_variables=canonize_bounded_variables(state.scopes, scope_id))
+            rv, new_csp = self.evaluate(stmt.bool_expr, state=state.state, csp=state.csp, bounded_variables=canonicalize_bounded_variables(state.scopes, scope_id))
             if isinstance(rv, OptimisticValue):
                 self.bfs_add_queue(state.clone(program=None, csp=new_csp.add_equal_constraint(rv, True)))
             else:
@@ -518,7 +518,7 @@ class CrowRegressionPlannerAStarv1(CrowRegressionPlanner):
     def _bfs_expand_inner_action_effect(self, planning_state: _AStarNode, stmt: CrowBehavior, scope_id: int):
         new_csp = planning_state.csp.clone() if planning_state.csp is not None else None
         new_state = execute_behavior_effect(
-            self.executor, stmt, planning_state.state, canonize_bounded_variables(planning_state.scopes, scope_id), csp=new_csp,
-            action_index=len(planning_state.left_statements) - 1
+            self.executor, stmt, planning_state.state, canonicalize_bounded_variables(planning_state.scopes, scope_id), csp=new_csp,
+            state_index=len(planning_state.left_statements)
         )
         self.bfs_add_queue(planning_state.clone(program=None, state=new_state, csp=new_csp))

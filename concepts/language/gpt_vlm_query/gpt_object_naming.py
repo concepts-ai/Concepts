@@ -53,14 +53,14 @@ def get_object_names(image: np.ndarray, masks: List[np.ndarray], class_names: Li
     ]
 
     gpt_return_result = client.chat.completions.create(model="gpt-4o", messages=messages)
-    print('GPT return result:', gpt_return_result.choices[0].message.content)
+    print('GPT return result:', gpt_return_result.choices[0].message.content, sep='\n')
     tags = extract_tag(gpt_return_result.choices[0].message.content, 'name')
     if len(tags) != len(masks):
         raise ParsingFailedError('Failed to parse the object names from the GPT model output.')
     return tags
 
 
-def get_object_names_for_multiple_masks(image_mask_pairs: List[Tuple[np.ndarray, np.ndarray]], class_names: List[str]) -> List[str]:
+def get_object_names_for_multiple_masks(image_mask_pairs: List[Tuple[np.ndarray, np.ndarray]], class_names: List[str], merge_queries: bool = True) -> List[str]:
     """Get the object names from the given image-mask pairs.
 
     Args:
@@ -70,6 +70,9 @@ def get_object_names_for_multiple_masks(image_mask_pairs: List[Tuple[np.ndarray,
     Returns:
         The list of object names.
     """
+
+    if not merge_queries:
+        return [get_object_names(image, [mask], class_names)[0] for image, mask in image_mask_pairs]
 
     # Merge masks belonging to the same image into a single query.
     images = {id(image): image for image, _ in image_mask_pairs}

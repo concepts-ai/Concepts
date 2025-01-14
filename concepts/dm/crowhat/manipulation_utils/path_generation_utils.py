@@ -11,10 +11,11 @@
 import numpy as np
 from typing import Optional, Union, Iterator, Sequence, Tuple, List
 
+import jacinle
 from concepts.math.rotationlib_xyzw import normalize_vector, slerp
 from concepts.math.frame_utils_xyzw import get_transform_a_to_b
 from concepts.utils.typing_utils import Vec3f, Vec4f, VecNf
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface
 from concepts.dm.crowhat.manipulation_utils.pose_utils import angle_distance
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     # Collision-free path planning from end-effector path and current qpos.
     'gen_qpos_path_from_ee_path',
     'gen_collision_free_qpos_path_from_current_qpos_and_ee_path',
+    'gen_differential_ik_qpos_path_from_current_qpos_and_ee_path',
     'gen_collision_free_qpos_path_from_current_qpos_and_ee_linear_path',
     'gen_collision_free_qpos_path_from_current_qpos_and_ee_pose',
     'gen_qpos_path_from_current_qpos_and_ee_pose',
@@ -36,7 +38,7 @@ __all__ = [
 ]
 
 
-def calc_grasp_pose_from_current_object_pose_and_ee_pose(robot: SingleArmMotionPlanningInterface, object_id: int, ee_pos: Vec3f, ee_dir: Vec3f = (0., 0., -1.), ee_dir2: Vec3f = (1., 0., 0.)) -> Tuple[Vec3f, Vec4f]:
+def calc_grasp_pose_from_current_object_pose_and_ee_pose(robot: SingleGroupMotionPlanningInterface, object_id: int, ee_pos: Vec3f, ee_dir: Vec3f = (0., 0., -1.), ee_dir2: Vec3f = (1., 0., 0.)) -> Tuple[Vec3f, Vec4f]:
     """Compute the grasp pose from the current object pose and the desired ee pose.
 
     Args:
@@ -54,7 +56,7 @@ def calc_grasp_pose_from_current_object_pose_and_ee_pose(robot: SingleArmMotionP
 
 
 def gen_collision_free_qpos_path_from_current_qpos_and_target_qpos(
-    robot: SingleArmMotionPlanningInterface, target_qpos: np.ndarray, ignored_collision_bodies: Optional[List[int]] = None,
+    robot: SingleGroupMotionPlanningInterface, target_qpos: np.ndarray, ignored_collision_bodies: Optional[List[int]] = None,
     return_smooth_path: bool = False,
     verbose: bool = False
 ) -> Optional[List[np.ndarray]]:
@@ -76,7 +78,7 @@ def gen_collision_free_qpos_path_from_current_qpos_and_target_qpos(
     return calc_smooth_qpos_path_from_qpos_path(robot, path) if return_smooth_path else path
 
 
-def calc_interpolated_qpos_path_from_current_qpos_and_target_qpos(robot: SingleArmMotionPlanningInterface, target_qpos: np.ndarray) -> List[np.ndarray]:
+def calc_interpolated_qpos_path_from_current_qpos_and_target_qpos(robot: SingleGroupMotionPlanningInterface, target_qpos: np.ndarray) -> List[np.ndarray]:
     """Generate a linearly interpolated path from the current qpos to reach the target qpos.
 
     Args:
@@ -89,7 +91,7 @@ def calc_interpolated_qpos_path_from_current_qpos_and_target_qpos(robot: SingleA
     return robot.get_configuration_space().gen_path(robot.get_qpos(), target_qpos)[1]
 
 
-def is_collision_free_qpos(robot: SingleArmMotionPlanningInterface, qpos: np.ndarray, exclude: Optional[List[int]] = None, verbose: bool = False) -> bool:
+def is_collision_free_qpos(robot: SingleGroupMotionPlanningInterface, qpos: np.ndarray, exclude: Optional[List[int]] = None, ignore_self_collision: bool = True, verbose: bool = False) -> bool:
     """Check whether the given qpos is collision free. The function also accepts a list of object ids to exclude (e.g., the object in hand).
 
     Args:
@@ -101,10 +103,10 @@ def is_collision_free_qpos(robot: SingleArmMotionPlanningInterface, qpos: np.nda
     Returns:
         True if the qpos is collision free.
     """
-    return not robot.check_collision(qpos, ignore_self_collision=True, ignored_collision_bodies=exclude)
+    return not robot.check_collision(qpos, ignore_self_collision=ignore_self_collision, ignored_collision_bodies=exclude, verbose=verbose)
 
 
-def is_collision_free_ee_pose(robot: SingleArmMotionPlanningInterface, pos: np.ndarray, quat: Optional[np.ndarray] = None, exclude: Optional[List[int]] = None, verbose: bool = False) -> bool:
+def is_collision_free_ee_pose(robot: SingleGroupMotionPlanningInterface, pos: np.ndarray, quat: Optional[np.ndarray] = None, exclude: Optional[List[int]] = None, verbose: bool = False) -> bool:
     """Check whether there is a qpos at the givne pose that is collision free. The function also accepts a list of object ids to exclude (e.g., the object in hand).
     This function is not recommended to use, since it is not fully reproducible (there will be multiple qpos that can achieve the same pose).
 
@@ -127,14 +129,14 @@ def is_collision_free_ee_pose(robot: SingleArmMotionPlanningInterface, pos: np.n
     return is_collision_free_qpos(robot, qpos, exclude=exclude, verbose=verbose)
 
 
-def is_collision_free_qpos_path(robot: SingleArmMotionPlanningInterface, qpos_trajectory: List[np.ndarray], exclude: Optional[List[int]] = None, verbose: bool = False) -> bool:
+def is_collision_free_qpos_path(robot: SingleGroupMotionPlanningInterface, qpos_trajectory: List[np.ndarray], exclude: Optional[List[int]] = None, verbose: bool = False) -> bool:
     for qpos in qpos_trajectory:
         if not is_collision_free_qpos(robot, qpos, exclude=exclude, verbose=verbose):
             return False
     return True
 
 
-def gen_qpos_path_from_ee_path(robot: SingleArmMotionPlanningInterface, trajectory: List[Tuple[np.ndarray, np.ndarray]], max_pairwise_distance: float = 0.1, verbose: bool = False) -> Tuple[bool, List[np.ndarray]]:
+def gen_qpos_path_from_ee_path(robot: SingleGroupMotionPlanningInterface, trajectory: List[Tuple[np.ndarray, np.ndarray]], max_pairwise_distance: float = 0.1, verbose: bool = False) -> Tuple[bool, List[np.ndarray]]:
     """Given a list of 6D poses, generate a list of qpos that the robot should follow to follow the trajectory.
 
     Args:
@@ -170,31 +172,40 @@ def gen_qpos_path_from_ee_path(robot: SingleArmMotionPlanningInterface, trajecto
 
 
 def gen_collision_free_qpos_path_from_current_qpos_and_ee_path(
-    robot: SingleArmMotionPlanningInterface, waypoints: Sequence[Tuple[Vec3f, Vec4f]], *,
+    robot: SingleGroupMotionPlanningInterface, waypoints: Sequence[Tuple[Vec3f, Vec4f]], *,
     nr_ik_attempts: int = 1,
     collision_free_planning: bool = True, collision_free_planning_first: bool = False, ignored_collision_bodies: Optional[List[int]] = None,
+    max_pairwise_distance: float = 0.1, rrt_kwargs: Optional[dict] = None,
     return_smooth_path: bool = False, generator: bool = False, verbose: bool = False,
 ) -> Union[Iterator[List[VecNf]], Optional[List[VecNf]]]:
+    if rrt_kwargs is None:
+        rrt_kwargs = dict()
+
     def dfs(remaining_waypoints, current_qpos: VecNf, is_first: bool = False) -> Iterator[List[VecNf]]:
         if len(remaining_waypoints) == 0:
             yield list()
             return
         target_pos, target_quat = remaining_waypoints[0]
         for _ in range(nr_ik_attempts):
-            solution = robot.ik(target_pos, target_quat, qpos=current_qpos)
+            solution = robot.ik(target_pos, target_quat, qpos=current_qpos, max_distance=max_pairwise_distance if not is_first else None)
             if verbose:
-                print(f'Generating IK (remaining waypoints: {len(remaining_waypoints)}): {solution is not None}')
+                jacinle.lf_indent_print(f'Generating IK (remaining waypoints: {len(remaining_waypoints)}): found={solution is not None} {solution}')
             if solution is None:
-                continue
-            if robot.check_collision(solution, ignored_collision_bodies=ignored_collision_bodies):
-                if verbose:
-                    print(f'Collision detected (remaining waypoints: {len(remaining_waypoints)}): {solution is not None}')
                 continue
 
             if collision_free_planning and (not collision_free_planning_first or is_first):
-                rv, path = robot.rrt_collision_free(current_qpos, solution, smooth_fine_path=True, ignored_collision_bodies=ignored_collision_bodies, verbose=verbose)
+                # Delegate the collision checking to the RRT planner.
+                pass
+            else:
+                if robot.check_collision(solution, ignored_collision_bodies=ignored_collision_bodies):
+                    if verbose:
+                        jacinle.lf_indent_print(f'IK solution collision detected (remaining waypoints: {len(remaining_waypoints)}): found={solution is not None} {solution}')
+                    continue
+
+            if collision_free_planning and (not collision_free_planning_first or is_first):
+                rv, path = robot.rrt_collision_free(current_qpos, solution, smooth_fine_path=True, ignored_collision_bodies=ignored_collision_bodies, verbose=verbose, **rrt_kwargs)
                 if verbose:
-                    print(f'Generating path (remaining waypoints: {len(remaining_waypoints)}): {rv} {len(path) if path is not None else 0}')
+                    jacinle.lf_indent_print(f'Generating path (remaining waypoints: {len(remaining_waypoints)}): {rv} {len(path) if path is not None else 0}')
                 if rv:
                     for remaining_path in dfs(remaining_waypoints[1:], path[-1]):
                         yield path + remaining_path
@@ -212,10 +223,26 @@ def gen_collision_free_qpos_path_from_current_qpos_and_ee_path(
     return None
 
 
+def gen_differential_ik_qpos_path_from_current_qpos_and_ee_path(
+    robot: SingleGroupMotionPlanningInterface, waypoints: Sequence[Tuple[Vec3f, Vec4f]]
+):
+    """Generate a path using Differential IK from the current qpos to follow the set of EE waypoints. Note that if the current qpos is too far from the first waypoint,
+    this function may generate unexpected results."""
+
+    qpos_list = list()
+    with robot.planning_world.checkpoint_world() :
+        qpos = robot.get_qpos()
+        for target_pos, target_quat in waypoints:
+            qpos = robot.calc_differential_ik(qpos, robot.get_ee_pose(), (target_pos, target_quat))
+            robot.set_qpos(qpos)
+            qpos_list.append(qpos)
+    return qpos_list
+
+
 def gen_collision_free_qpos_path_from_current_qpos_and_ee_linear_path(
-    robot: SingleArmMotionPlanningInterface, target_pos1, target_pos2, ee_dir: Optional[Vec3f] = (0, 0, -1), ee_dir2: Optional[Vec3f] = (1, 0, 0), nr_waypoints: int = 10, *,
-    nr_ik_attempts: int = 1,
-    collision_free_planning: bool = True, collision_free_planning_first: bool = False, ignored_collision_bodies: Optional[List[int]] = None,
+    robot: SingleGroupMotionPlanningInterface, target_pos1, target_pos2, ee_dir: Optional[Vec3f] = (0, 0, -1), ee_dir2: Optional[Vec3f] = (1, 0, 0), nr_waypoints: int = 10, *,
+    nr_ik_attempts: int = 1, max_pairwise_distance: float = 0.1,
+    collision_free_planning: bool = True, collision_free_planning_first: bool = False, ignored_collision_bodies: Optional[List[int]] = None, rrt_kwargs: Optional[dict] = None,
     return_smooth_path: bool = False, generator: bool = False, verbose: bool = False
 ):
     """Generate a collision-free Cartesian path from the current qpos to follow a straight line from target_pos1 to target_pos2."""
@@ -225,15 +252,16 @@ def gen_collision_free_qpos_path_from_current_qpos_and_ee_linear_path(
 
     return gen_collision_free_qpos_path_from_current_qpos_and_ee_path(
         robot, waypoints, ignored_collision_bodies=ignored_collision_bodies,
-        nr_ik_attempts=nr_ik_attempts, collision_free_planning=collision_free_planning, collision_free_planning_first=collision_free_planning_first,
+        nr_ik_attempts=nr_ik_attempts, max_pairwise_distance=max_pairwise_distance,
+        collision_free_planning=collision_free_planning, collision_free_planning_first=collision_free_planning_first, rrt_kwargs=rrt_kwargs,
         return_smooth_path=return_smooth_path, generator=generator, verbose=verbose
     )
 
 
 def gen_collision_free_qpos_path_from_current_qpos_and_ee_pose(
-    robot: SingleArmMotionPlanningInterface, target_pos: Vec3f, target_quat: Optional[Vec4f] = None, ee_dir: Optional[Vec3f] = (0, 0, -1), ee_dir2: Optional[Vec3f] = (1, 0, 0), *,
-    nr_ik_attempts: int = 1,
-    collision_free_planning: bool = True, collision_free_planning_first: bool = False, ignored_collision_bodies: Optional[List[int]] = None,
+    robot: SingleGroupMotionPlanningInterface, target_pos: Vec3f, target_quat: Optional[Vec4f] = None, ee_dir: Optional[Vec3f] = (0, 0, -1), ee_dir2: Optional[Vec3f] = (1, 0, 0), *,
+    nr_ik_attempts: int = 1, max_pairwise_distance: float = float('inf'),
+    collision_free_planning: bool = True, collision_free_planning_first: bool = False, ignored_collision_bodies: Optional[List[int]] = None, rrt_kwargs: Optional[dict] = None,
     return_smooth_path: bool = False, generator: bool = False, verbose: bool = False
 ):
     """Generate a collision-free path from the current qpos to reach the target_pos."""
@@ -242,14 +270,15 @@ def gen_collision_free_qpos_path_from_current_qpos_and_ee_pose(
     waypoints = [(target_pos, target_quat)]
 
     return gen_collision_free_qpos_path_from_current_qpos_and_ee_path(
-        robot, waypoints, ignored_collision_bodies=ignored_collision_bodies, nr_ik_attempts=nr_ik_attempts,
-        collision_free_planning=collision_free_planning, collision_free_planning_first=collision_free_planning_first,
+        robot, waypoints, ignored_collision_bodies=ignored_collision_bodies,
+        nr_ik_attempts=nr_ik_attempts, max_pairwise_distance=max_pairwise_distance,
+        collision_free_planning=collision_free_planning, collision_free_planning_first=collision_free_planning_first, rrt_kwargs=rrt_kwargs,
         return_smooth_path=return_smooth_path, generator=generator, verbose=verbose
     )
 
 
 def gen_qpos_path_from_current_qpos_and_ee_pose(
-    robot: SingleArmMotionPlanningInterface, target_pos: Vec3f, target_quat: Optional[Vec4f] = None, ee_dir: Optional[Vec3f] = (0, 0, -1), ee_dir2: Optional[Vec3f] = (1, 0, 0), *,
+    robot: SingleGroupMotionPlanningInterface, target_pos: Vec3f, target_quat: Optional[Vec4f] = None, ee_dir: Optional[Vec3f] = (0, 0, -1), ee_dir2: Optional[Vec3f] = (1, 0, 0), *,
     nr_ik_attempts: int = 1,
     return_smooth_path: bool = False, generator: bool = False, verbose: bool = False
 ):
@@ -264,7 +293,7 @@ def gen_qpos_path_from_current_qpos_and_ee_pose(
     )
 
 
-def calc_smooth_qpos_path_from_qpos_path(robot: SingleArmMotionPlanningInterface, qt: Optional[List[VecNf]], skip_first: bool = True) -> Optional[List[VecNf]]:
+def calc_smooth_qpos_path_from_qpos_path(robot: SingleGroupMotionPlanningInterface, qt: Optional[List[VecNf]], skip_first: bool = True) -> Optional[List[VecNf]]:
     if qt is None:
         return None
 
@@ -279,7 +308,7 @@ def calc_smooth_qpos_path_from_qpos_path(robot: SingleArmMotionPlanningInterface
     return smooth_qt
 
 
-def wrap_iterator_smooth_qpos_path(robot: SingleArmMotionPlanningInterface, qt_iterator: Iterator[List[VecNf]]) -> Iterator[List[VecNf]]:
+def wrap_iterator_smooth_qpos_path(robot: SingleGroupMotionPlanningInterface, qt_iterator: Iterator[List[VecNf]]) -> Iterator[List[VecNf]]:
     for qt in qt_iterator:
         yield calc_smooth_qpos_path_from_qpos_path(robot, qt)
 

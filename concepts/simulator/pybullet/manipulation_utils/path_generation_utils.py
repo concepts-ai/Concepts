@@ -188,7 +188,7 @@ def gen_collision_free_qpos_path_from_current_qpos_and_ee_path(
                 if verbose:
                     print(f'Collision detected (remaining waypoints: {len(remaining_waypoints)}): {solution is not None}')
                     with robot.world.save_world_builtin():
-                        robot.set_qpos_with_holding(solution)
+                        robot.set_qpos_with_attached_objects(solution)
                         collisions = robot.is_colliding(return_contacts=True, ignored_collision_bodies=ignored_collision_bodies)
                         print([[collision.body_a_name, collision.body_b_name] for collision in collisions])
                         input('Press any key to continue')

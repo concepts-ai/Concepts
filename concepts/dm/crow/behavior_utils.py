@@ -23,7 +23,7 @@ from concepts.dsl.expression_utils import surface_fol_downcast, find_free_variab
 
 from concepts.dm.crow.controller import CrowController, CrowControllerApplicationExpression
 from concepts.dm.crow.crow_expression_utils import crow_replace_expression_variables
-from concepts.dm.crow.behavior import CrowBehavior, CrowAchieveExpression, CrowUntrackExpression, CrowBindExpression, CrowAssertExpression
+from concepts.dm.crow.behavior import CrowBehavior, CrowAchieveExpression, CrowUntrackExpression, CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression
 from concepts.dm.crow.behavior import CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression
 from concepts.dm.crow.behavior import CrowBehaviorOrderingSuite, CrowBehaviorCommit
 from concepts.dm.crow.behavior import CrowBehaviorForeachLoopSuite, CrowBehaviorWhileLoopSuite, CrowBehaviorConditionSuite, CrowEffectApplier
@@ -110,14 +110,16 @@ def match_policy_applicable_behaviors(
 
 
 def crow_replace_expression_variables_ext(
-    expr: Union[Expression, CrowBindExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression, CrowControllerApplicationExpression, CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression],
+    expr: Union[Expression, CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression, CrowControllerApplicationExpression, CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression],
     mappings: Optional[Dict[Union[FunctionApplicationExpression, VariableExpression], Union[Variable, ValueOutputExpression]]] = None,
     ctx: Optional[ExpressionDefinitionContext] = None,
-) -> Union[ObjectOrValueOutputExpression, VariableAssignmentExpression, CrowBindExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression, CrowControllerApplicationExpression, CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression]:
+) -> Union[ObjectOrValueOutputExpression, VariableAssignmentExpression, CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression, CrowControllerApplicationExpression, CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression]:
     if isinstance(expr, Expression):
         return crow_replace_expression_variables(expr, mappings, ctx)
     if isinstance(expr, CrowBindExpression):
         return CrowBindExpression(expr.variables, crow_replace_expression_variables(expr.goal, mappings, ctx))
+    if isinstance(expr, CrowMemQueryExpression):
+        return CrowMemQueryExpression(crow_replace_expression_variables(expr.goal, mappings, ctx))
     if isinstance(expr, CrowAssertExpression):
         return CrowAssertExpression(crow_replace_expression_variables(expr.bool_expr, mappings, ctx), once=expr.once)
     if isinstance(expr, CrowRuntimeAssignmentExpression):
@@ -139,7 +141,7 @@ def crow_replace_expression_variables_ext(
 
 def format_behavior_statement(
     program: Union[
-        Expression, CrowBehaviorOrderingSuite, CrowBindExpression, CrowAssertExpression, CrowControllerApplicationExpression, CrowFeatureAssignmentExpression,
+        Expression, CrowBehaviorOrderingSuite, CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression, CrowControllerApplicationExpression, CrowFeatureAssignmentExpression,
         CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorEffectApplicationExpression, CrowBehaviorApplicationExpression
     ], scopes: Optional[dict] = None, scope_id: Optional[int] = None, scope: Optional[dict] = None
 ) -> str:
@@ -151,6 +153,8 @@ def format_behavior_statement(
             return str(program) + f'@({scope_id})'
         if isinstance(program, CrowBindExpression):
             return f'bind@{scope_id} {", ".join(str(var) for var in program.variables)} where {crow_replace_expression_variables(program.goal)}'
+        if isinstance(program, CrowMemQueryExpression):
+            return f'mem_query@{scope_id} {crow_replace_expression_variables(program.query)}'
         if isinstance(program, CrowAssertExpression):
             return f'{program.op_str}@{scope_id} {str(program.bool_expr)}'
         if isinstance(program, CrowRuntimeAssignmentExpression):
@@ -206,7 +210,7 @@ def format_behavior_statement(
                 formatted_value = ConstantExpression(value)
             else:
                 formatted_value = value
-            formatted_scope[formatted_name] = formatted_value
+            formatted_scope[VariableExpression(formatted_name)] = formatted_value
         scope = formatted_scope
 
     if isinstance(program, Expression):
@@ -215,6 +219,8 @@ def format_behavior_statement(
         return str(crow_replace_expression_variables(program, scope))
     if isinstance(program, CrowBindExpression):
         return f'bind {", ".join(str(var) for var in program.variables)} <- {crow_replace_expression_variables(program.goal, scope)}'
+    if isinstance(program, CrowMemQueryExpression):
+        return f'mem_query {crow_replace_expression_variables(program.query, scope)}'
     if isinstance(program, CrowAssertExpression):
         return f'{program.op_str} {crow_replace_expression_variables(program.bool_expr, scope)}'
     if isinstance(program, CrowRuntimeAssignmentExpression):
@@ -268,7 +274,7 @@ def format_behavior_program(program: CrowBehaviorOrderingSuite, scopes: Optional
 def execute_effect_statements(
     executor: CrowExecutor, statements: Sequence[Union[CrowFeatureAssignmentExpression, CrowBehaviorForeachLoopSuite, CrowBehaviorConditionSuite]],
     state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None,
-    scope: Optional[dict] = None, action_index: Optional[int] = None
+    scope: Optional[dict] = None, state_index: Optional[int] = None
 ):
     if scope is None:
         scope = dict()
@@ -276,7 +282,7 @@ def execute_effect_statements(
         scope = {k: v for k, v in scope.items() if not (k.startswith('__') and k.endswith('__'))}
     for stmt in statements:
         if isinstance(stmt, CrowFeatureAssignmentExpression):
-            with executor.update_effect_mode(stmt.evaluation_mode, action_index=action_index):
+            with executor.update_effect_mode(stmt.evaluation_mode, state_index=state_index):
                 executor.execute(AssignExpression(stmt.feature, stmt.value), state=state, csp=csp, bounded_variables=scope)
         elif isinstance(stmt, CrowBehaviorForeachLoopSuite) and stmt.is_foreach_in_expression:
             var = stmt.variable
@@ -304,15 +310,15 @@ def execute_effect_statements(
             raise ValueError(f'Unsupported statement type: {type(stmt)}')
 
 
-def execute_behavior_effect_body(executor: CrowExecutor, behavior: Union[CrowBehavior, CrowController], state: CrowState, scope: dict, csp: Optional[ConstraintSatisfactionProblem] = None, action_index: Optional[int] = None) -> CrowState:
+def execute_behavior_effect_body(executor: CrowExecutor, behavior: Union[CrowBehavior, CrowController], state: CrowState, scope: dict, csp: Optional[ConstraintSatisfactionProblem] = None, state_index: Optional[int] = None) -> CrowState:
     """Execute a behavior effect with for-loops and conditional statements."""
     new_state = state.clone()
-    execute_effect_statements(executor, behavior.effect_body.statements, new_state, csp=csp, scope=scope, action_index=action_index)
+    execute_effect_statements(executor, behavior.effect_body.statements, new_state, csp=csp, scope=scope, state_index=state_index)
     return new_state
 
 
-def execute_effect_applier(executor: CrowExecutor, applier: CrowEffectApplier, state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None, action_index: Optional[int] = None) -> CrowState:
-    return execute_effect_statements(executor, applier.statements, state, csp=csp, scope=applier.bounded_variables, action_index=action_index)
+def execute_effect_applier(executor: CrowExecutor, applier: CrowEffectApplier, state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None, state_index: Optional[int] = None) -> CrowState:
+    return execute_effect_statements(executor, applier.statements, state, csp=csp, scope=applier.bounded_variables, state_index=state_index)
 
 
 def execute_object_bind(executor: CrowExecutor, stmt: CrowBindExpression, state: CrowState, scope: dict) -> Iterator[Dict[str, Union[ObjectConstant, Variable]]]:
@@ -327,11 +333,18 @@ def execute_object_bind(executor: CrowExecutor, stmt: CrowBindExpression, state:
     Returns:
         an iterator of possible scopes with the bind statement applied.
     """
+
     if stmt.goal.is_null_expression:
         rv = TensorValue.TRUE
     else:
         eval_scope = {k: v for k, v in scope.items() if not (k.startswith('__') and k.endswith('__'))}
         for var in stmt.variables:
+            # NB(Jiayuan Mao @ 2024/11/17): This is a hack to avoid the case where the variable is already in the scope.
+            # The reason is that, for everywhere else in the code, the scope is a mapping from name string => value.
+            # However, here, since we need to specify QINDEX, we need to use the variable object as the key.
+            # Then this will cause two variables with the same name but different objects to be treated as different.
+            if var.name in eval_scope:
+                del eval_scope[var.name]
             eval_scope[var] = QINDEX
         rv = executor.execute(stmt.goal, state=state, bounded_variables=eval_scope)
 

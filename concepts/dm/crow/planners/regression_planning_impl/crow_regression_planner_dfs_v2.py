@@ -23,7 +23,7 @@ from concepts.dm.crow.behavior import CrowBehaviorOrderingSuite, CrowBehaviorApp
 from concepts.dm.crow.behavior_utils import match_applicable_behaviors, ApplicableBehaviorItem, execute_object_bind, format_behavior_program
 
 from concepts.dm.crow.planners.regression_planning import CrowPlanningResult, CrowRegressionPlanner, ScopedCrowExpression
-from concepts.dm.crow.planners.regression_utils import canonize_bounded_variables
+from concepts.dm.crow.planners.regression_utils import canonicalize_bounded_variables
 from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_dfs_v1_utils import execute_behavior_effect_batch, unique_results
 
 
@@ -111,7 +111,7 @@ class CrowRegressionPlannerDFSv2(CrowRegressionPlanner):
                     allow_promotable=state.allow_promotable, depth=state.depth + 1
                 ))
             for last_result in last_results:
-                rv = self.executor.execute(stmt.goal, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id))
+                rv = self.executor.execute(stmt.goal, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id))
                 # jacinle.log_function.print('Last result:', last_result.actions, 'Null Eval =', bool(rv.item()))
                 if bool(rv.item()):
                     new_results.append(last_result)
@@ -140,7 +140,7 @@ class CrowRegressionPlannerDFSv2(CrowRegressionPlanner):
                 ))
 
             for last_result in last_results:
-                argument_values = [self.executor.execute(x, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id)) for x in stmt.arguments]
+                argument_values = [self.executor.execute(x, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id)) for x in stmt.arguments]
                 action_matching = ApplicableBehaviorItem(stmt.behavior, {k.name: v for k, v in zip(stmt.behavior.arguments, argument_values)})
                 new_results.extend(self._dfs_expand_action(state, [last_result], left, action_matching, scope_id))
         elif isinstance(stmt, (CrowBindExpression, CrowRuntimeAssignmentExpression, CrowAssertExpression, CrowControllerApplicationExpression)):
@@ -229,7 +229,7 @@ class CrowRegressionPlannerDFSv2(CrowRegressionPlanner):
         """Apply a primitive statement on top of a particular planning result of the left branch."""
         # jacinle.log_function.print('Expanding primitive:', stmt, 'with scope_id:', scope_id)
         if isinstance(stmt, CrowControllerApplicationExpression):
-            argument_values = [self.executor.execute(x, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id)) for x in stmt.arguments]
+            argument_values = [self.executor.execute(x, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id)) for x in stmt.arguments]
             for i, argv in enumerate(argument_values):
                 if isinstance(argv, StateObjectReference):
                     argument_values[i] = argv.name
@@ -237,24 +237,24 @@ class CrowRegressionPlannerDFSv2(CrowRegressionPlanner):
         elif isinstance(stmt, CrowBindExpression):
             if stmt.is_object_bind:
                 new_results = list()
-                for new_scope in execute_object_bind(self.executor, stmt, last_result.state, canonize_bounded_variables(last_result.scopes, scope_id)):
+                for new_scope in execute_object_bind(self.executor, stmt, last_result.state, canonicalize_bounded_variables(last_result.scopes, scope_id)):
                     new_scopes = last_result.scopes.copy()
                     new_scopes[scope_id] = new_scope
                     new_results.append(CrowPlanningResult(last_result.state, last_result.csp, last_result.controller_actions, new_scopes))
-                # jacinle.log_function.print(f'Object binding results for {stmt} under scope {canonize_bounded_variables(last_result.scopes, scope_id)}:', len(new_results), 'states.')
+                # jacinle.log_function.print(f'Object binding results for {stmt} under scope {canonicalize_bounded_variables(last_result.scopes, scope_id)}:', len(new_results), 'states.')
                 return new_results
             else:
                 raise NotImplementedError()
         elif isinstance(stmt, CrowRuntimeAssignmentExpression):
-            rv = self.executor.execute(stmt.value, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id))
+            rv = self.executor.execute(stmt.value, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id))
             new_scopes = last_result.scopes.copy()
             new_scopes[scope_id] = last_result.scopes[scope_id].copy()
             new_scopes[scope_id][stmt.variable.name] = rv.item()
             return [CrowPlanningResult(last_result.state, last_result.csp, last_result.controller_actions, new_scopes)]
         elif isinstance(stmt, CrowAssertExpression):
             # TODO(Jiayuan Mao @ 2024/03/19): implement the CSP tracking.
-            rv = self.executor.execute(stmt.bool_expr, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id))
-            # jacinle.log_function.print(f'Assert {stmt.bool_expr} under scope {canonize_bounded_variables(last_result.scopes, scope_id)}:', bool(rv.item()))
+            rv = self.executor.execute(stmt.bool_expr, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id))
+            # jacinle.log_function.print(f'Assert {stmt.bool_expr} under scope {canonicalize_bounded_variables(last_result.scopes, scope_id)}:', bool(rv.item()))
             if bool(rv.item()):
                 return [last_result]
             else:

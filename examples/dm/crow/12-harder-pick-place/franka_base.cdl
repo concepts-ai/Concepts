@@ -1,0 +1,16 @@
+domain "franka-base"
+
+typedef Object: object
+typedef Pose: vector[float32] # The 6D pose of an object. Internally represented as (x, y, z, qx, qy, qz, qw).
+typedef QPos: vector[float32] # The 7D joint configuration of a robot.
+
+feature qpos() -> QPos
+feature pose_of(object: Object) -> Pose
+feature holding(object: Object) -> bool
+
+typedef Trajectory: pyobject  # Trajectory is of Python type RobotQPosPath
+
+controller move_ctl(trajectory: Trajectory)
+controller grasp_ctl(x: Object)
+controller open_gripper_ctl()
+controller close_gripper_ctl()

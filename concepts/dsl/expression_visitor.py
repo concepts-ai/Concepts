@@ -35,10 +35,10 @@ class ExpressionVisitor(object):
             return self.visit_null_expression(expr)
         elif isinstance(expr, E.VariableExpression):
             return self.visit_variable_expression(expr)
-        elif isinstance(expr, E.ObjectConstantExpression):
-            return self.visit_object_constant_expression(expr)
         elif isinstance(expr, E.ConstantExpression):
             return self.visit_constant_expression(expr)
+        elif isinstance(expr, E.ObjectConstantExpression):
+            return self.visit_object_constant_expression(expr)
         elif isinstance(expr, E.ListCreationExpression):
             return self.visit_list_creation_expression(expr)
         elif isinstance(expr, E.ListExpansionExpression):

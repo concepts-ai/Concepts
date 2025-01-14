@@ -16,7 +16,7 @@ from typing import Iterator, NamedTuple, Optional, Tuple
 import numpy as np
 import open3d as o3d
 
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface
 from concepts.dm.crowhat.world.planning_world_interface import PlanningWorldInterface
 from concepts.math.rotationlib_xyzw import enumerate_quaternion_from_vectors, quat_mul, quat_conjugate, rotate_vector
 from concepts.math.frame_utils_xyzw import solve_ee_from_tool, get_transform_a_to_b
@@ -133,7 +133,7 @@ def gen_candidate_pose_b_from_two_contact_points(planning_world: PlanningWorldIn
         yield final_b_pos, final_b_quat
 
 
-def gen_ee_pose_from_contact_point(planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface, object_id: int, contact_point: ContactPointProposal, distance: float = 0.01, z_delta: float = 0.0, nr_trials: int = 4, side: str = 'front') -> Iterator[Tuple[Vec3f, Vec4f]]:
+def gen_ee_pose_from_contact_point(planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface, object_id: int, contact_point: ContactPointProposal, distance: float = 0.01, z_delta: float = 0.0, nr_trials: int = 4, side: str = 'front') -> Iterator[Tuple[Vec3f, Vec4f]]:
     """Generate the end-effector pose in order to push the object with the given contact point.
 
     Args:
@@ -165,7 +165,7 @@ def gen_ee_pose_from_contact_point(planning_world: PlanningWorldInterface, robot
         yield pos, quat
 
 
-def gen_robot_qpos_from_attached_object_pose(planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface, pos: Vec3f, quat: Vec4f, nr_trials: int = 10, max_returns: int = 1) -> Iterator[Tuple[Tuple[Vec3f, Vec4f], np.ndarray]]:
+def gen_robot_qpos_from_attached_object_pose(planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface, pos: Vec3f, quat: Vec4f, nr_trials: int = 10, max_returns: int = 1) -> Iterator[Tuple[Tuple[Vec3f, Vec4f], np.ndarray]]:
     """Generate the robot qpos with the attached object pose.
 
     Args:

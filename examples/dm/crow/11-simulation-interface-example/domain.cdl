@@ -1,0 +1,24 @@
+domain "simulator-example"
+
+typedef Object: object
+
+feature f(x: Object) -> float32
+
+controller ctl(x: Object, a: float32)
+
+def [[simulation]] valid_goal_f(f: float32) -> bool
+def [[generator_placeholder]] valid_action(x: Object, a: float32) -> bool
+
+generator gen_valid_action(x: Object, a: float32):
+  goal: valid_action(x, a)
+  in: x
+  out: a
+
+behavior b1(x: Object):
+  goal: valid_goal_f(f(x))
+  body:
+    bind a: float32 where: valid_action(x, a)
+    ctl(x, a)
+  eff:
+    [[simulation]] f[x] = ...
+

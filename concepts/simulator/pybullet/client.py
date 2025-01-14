@@ -24,6 +24,7 @@ import pybullet_data
 import jacinle
 import jacinle.io as io
 
+from concepts.math.rotationlib_xyzw import quat2mat
 from concepts.simulator.pybullet.world import BulletWorld
 from concepts.utils.typing_utils import Vec3f, Vec4f
 
@@ -101,7 +102,7 @@ class BulletClient(object):
         self.render_fps = render_fps if render_fps is not None else self.fps
         if not self.is_gui:
             self.render_fps = 0
-        self.gravity = canonize_gravity(gravity if gravity is not None else type(self).DEFAULT_GRAVITY)
+        self.gravity = canonicalize_gravity(gravity if gravity is not None else type(self).DEFAULT_GRAVITY)
         self.engine_parameters = engine_parameters
         self.client_id = None
         self.assets_root = assets_root if assets_root is not None else type(self).DEFAULT_ASSETS_ROOT
@@ -327,8 +328,8 @@ class BulletClient(object):
         self._nonphysics_step_callbacks.remove(cb)
 
     def load_urdf(self, xml_path, pos=(0, 0, 0), quat=(0, 0, 0, 1), body_name: Optional[str] = None, group: Optional[str] = '__UNSET__', static=False, scale: float = 1.0, rgba=None, notify_world_update=True) -> int:
-        xml_path = self._canonize_asset_path(xml_path)
-        pos, quat = canonize_default_pos_and_quat(pos, quat)
+        xml_path = self.canonicalize_asset_path(xml_path)
+        pos, quat = canonicalize_default_pos_and_quat(pos, quat)
         try:
             ret = p.loadURDF(xml_path, pos, quat, useFixedBase=static, globalScaling=scale, physicsClientId=self.client_id, flags=p.URDF_USE_SELF_COLLISION)
         except p.error as e:
@@ -342,7 +343,7 @@ class BulletClient(object):
         return ret
 
     def load_urdf_template(self, xml_path: str, replaces: Dict[str, Any], pos=None, quat=None, **kwargs) -> int:
-        xml_path = self._canonize_asset_path(xml_path)
+        xml_path = self.canonicalize_asset_path(xml_path)
         with open(xml_path) as f:
             xml_content = f.read()
         for k, v in sorted(replaces.items(), key=lambda x: len(x[0]), reverse=True):
@@ -357,16 +358,22 @@ class BulletClient(object):
             f.flush()
             return self.load_urdf(f.name, pos=pos, quat=quat, **kwargs)
 
+    def load_urdf_string(self, string: str, pos=None, quat=None, **kwargs) -> int:
+        with io.tempfile('w', '.urdf') as f:
+            f.write(string)
+            f.flush()
+            return self.load_urdf(f.name, pos=pos, quat=quat, **kwargs)
+
     def load_sdf(self, xml_path, scale=1.0, notify_world_update=True) -> int:
-        xml_path = self._canonize_asset_path(xml_path)
+        xml_path = self.canonicalize_asset_path(xml_path)
         ret = p.loadSDF(xml_path, globalScaling=scale, physicsClientId=self.client_id)
         if notify_world_update:
             self.w.notify_update(ret)
         return ret
 
     def load_mjcf(self, xml_path, pos=(0, 0, 0), quat=(0, 0, 0, 1), body_name=None, group='__UNSET__', static=False, notify_world_update=True) -> int:
-        xml_path = self._canonize_asset_path(xml_path)
-        pos, quat = canonize_default_pos_and_quat(pos, quat)
+        xml_path = self.canonicalize_asset_path(xml_path)
+        pos, quat = canonicalize_default_pos_and_quat(pos, quat)
         ret = p.loadMJCF(xml_path, pos, quat, useFixedBase=static, physicsClientId=self.client_id, flags=p.MJCF_COLORS_FROM_FILE)
         if notify_world_update:
             if group == '__UNSET__':
@@ -390,7 +397,7 @@ class BulletClient(object):
     def remove_body(self, body_id):
         return p.removeBody(body_id, physicsClientId=self.client_id)
 
-    def _canonize_asset_path(self, path):
+    def canonicalize_asset_path(self, path):
         return path.replace('assets://', self.assets_root + '/')
 
     def perform_collision_detection(self):
@@ -520,6 +527,14 @@ class BulletClient(object):
         else:
             return p.removeUserDebugItem(item_id, physicsClientId=self.client_id)
 
+    def remove_all_debug_items(self):
+        p.removeAllUserDebugItems(physicsClientId=self.client_id)
+
+    def remove_all_named_debug_items(self):
+        for item_id in self.debug_items.values():
+            self.remove_debug_item(item_id)
+        self.debug_items.clear()
+
     def add_debug_coordinate_system(self, pos, principle_axes, size: float = 0.1, name=None, life_time=0) -> Tuple[int, ...]:
         items = list()
         for i, axis in enumerate(principle_axes):
@@ -527,8 +542,12 @@ class BulletClient(object):
         rv = tuple(items)
         return self.register_debug_item(name, rv)
 
+    def add_debug_coordinate_system_quat(self, pos, quat, size: float = 0.1, name=None, life_time=0) -> Tuple[int, ...]:
+        mat = quat2mat(quat)
+        return self.add_debug_coordinate_system(pos, mat.T, size=size, name=name, life_time=life_time)
 
-def canonize_gravity(gravity):
+
+def canonicalize_gravity(gravity):
     if isinstance(gravity, (int, float)):
         return (0, 0, gravity)
     else:
@@ -537,7 +556,7 @@ def canonize_gravity(gravity):
         return gravity
 
 
-def canonize_default_pos_and_quat(pos: Optional[Vec3f], quat: Optional[Vec4f]):
+def canonicalize_default_pos_and_quat(pos: Optional[Vec3f], quat: Optional[Vec4f]):
     if pos is None:
         pos = (0, 0, 0)
     if quat is None:

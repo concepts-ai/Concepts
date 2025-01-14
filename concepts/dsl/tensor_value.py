@@ -31,8 +31,8 @@ if TYPE_CHECKING:
 __all__ = [
     'TensorizedPyObjValues', 'MaskedTensorStorage', 'TensorValue',  # Basic tensorized representations.
     'from_tensor', 'vector_values', 'scalar',  # Tensor value creation.
-    'concat_tvalues', 'index_tvalue', 'set_index_tvalue', 'expand_as_tvalue', 'expand_tvalue',
-    'simple_quantize_tvalue'
+    'concat_tvalues', 'index_tvalue', 'set_index_tvalue', 'expand_as_tvalue', 'expand_tvalue', 'expand_pyobj_value',
+    'is_tvalue_simple_quantizable', 'simple_quantize_tvalue'
 ]
 
 
@@ -175,7 +175,7 @@ class MaskedTensorStorage(object):
     """The quantized values for the tensor. -1 for non-quantized values."""
 
 
-def _canonize_batch_variables(batch_variables: Union[Iterable[str], int]) -> Tuple[str, ...]:
+def _canonicalize_batch_variables(batch_variables: Union[Iterable[str], int]) -> Tuple[str, ...]:
     if isinstance(batch_variables, int):
         batch_variables = tuple([f'#{i}' for i in range(batch_variables)])
     assert all(isinstance(v, str) for v in batch_variables), 'All batch variables should be strings.'
@@ -217,7 +217,7 @@ class TensorValue(ValueBase):
         """
         super().__init__(dtype)
 
-        self.batch_variables = _canonize_batch_variables(batch_variables)
+        self.batch_variables = _canonicalize_batch_variables(batch_variables)
         self.batch_dims = batch_dims
 
         self.tensor_mask = None
@@ -298,6 +298,10 @@ class TensorValue(ValueBase):
     def is_tensorized_pyobj(self):
         return isinstance(self.tensor, TensorizedPyObjValues)
 
+    @property
+    def variable_shape(self):
+        return self.tensor.shape[self.batch_dims:self.total_batch_dims]
+
     def get_variable_size(self, variable_name_or_index: Union[str, int]) -> int:
         if isinstance(variable_name_or_index, str):
             variable_name_or_index = self.batch_variables.index(variable_name_or_index)
@@ -310,10 +314,26 @@ class TensorValue(ValueBase):
             return MaskedTensorStorage(_maybe_clone_tensor(self.tensor), _maybe_clone_tensor(self.tensor_mask), _maybe_clone_tensor(self.tensor_optimistic_values), _maybe_clone_tensor(self.tensor_quantized_values))
         return MaskedTensorStorage(self.tensor, self.tensor_mask, self.tensor_optimistic_values, self.tensor_quantized_values)
 
+    def to_masked_tensor_storage_with_padding(self, target_shape: Tuple[int, ...]):
+        # TODO(Jiayuan Mao @ 2025/01/07): figure out the default value for tensor_mask.
+        return MaskedTensorStorage(
+            _maybe_pad_tensor(self.tensor, target_shape, self.dtype, self.batch_dims),
+            _maybe_pad_tensor(self.tensor_mask, target_shape, self.dtype, self.batch_dims),
+            _maybe_pad_tensor(self.tensor_optimistic_values, target_shape, self.dtype, self.batch_dims),
+            _maybe_pad_tensor(self.tensor_quantized_values, target_shape, self.dtype, self.batch_dims)
+        )
+
     def clone(self, clone_tensor=True, dtype: Optional[Union[TensorValueTypeBase, PyObjValueType, BatchedListType]] = None) -> 'TensorValue':
         storage = self.to_masked_tensor_storage(clone_tensor=clone_tensor)
         return type(self)(
             dtype if dtype is not None else self.dtype, self.batch_variables, storage, self.batch_dims,
+            _check_tensor=False, _mask_certified_flag=self._mask_certified_flag
+        )
+
+    def pad(self, target_shape: Tuple[int, ...]) -> 'TensorValue':
+        storage = self.to_masked_tensor_storage_with_padding(target_shape)
+        return type(self)(
+            self.dtype, self.batch_variables, storage, self.batch_dims,
             _check_tensor=False, _mask_certified_flag=self._mask_certified_flag
         )
 
@@ -322,7 +342,7 @@ class TensorValue(ValueBase):
             assert len(self.batch_variables) == len(new_variables)
         rv = self.clone() if clone else self
         rv.dtype = dtype if dtype is not None else self.dtype
-        rv.batch_variables = _canonize_batch_variables(new_variables)
+        rv.batch_variables = _canonicalize_batch_variables(new_variables)
         return rv
 
     def init_tensor_optimistic_values(self):
@@ -624,6 +644,12 @@ class TensorValue(ValueBase):
 
 def _maybe_clone_tensor(tensor: Optional[Union[torch.Tensor, TensorizedPyObjValues]]) -> Optional[torch.Tensor]:
     return tensor if tensor is None else tensor.clone()
+
+
+def _maybe_pad_tensor(tensor: Optional[torch.Tensor], target_shape: Tuple[int, ...], dtype: Optional[TensorValueTypeBase], batch_dims: int, constant_value: Optional[Union[int, float]] = None) -> Optional[torch.Tensor]:
+    if tensor is None:
+        return None
+    return _pad_tensor(tensor, target_shape, dtype=dtype, batch_dims=batch_dims, constant_value=constant_value)
 
 
 def from_tensor(value: torch.Tensor, dtype: Optional[Union[TensorValueTypeBase, BatchedListType]] = None, batch_variables: Optional[List[str]] = None, batch_dims: int = 0) -> TensorValue:

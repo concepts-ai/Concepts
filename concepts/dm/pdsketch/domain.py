@@ -742,13 +742,13 @@ class State(NamedObjectTensorState):
             self.features[feature_name] = tensor = TensorValue.make_empty(return_type, [var.name for var in function.arguments], sizes)
             tensor.init_tensor_optimistic_values()
             tensor.tensor_optimistic_values.fill_(OPTIM_MAGIC_NUMBER_MAGIC)
-            self.internals.setdefault('ditry_features', set()).add(feature_name)
+            self.internals.setdefault('dirty_features', set()).add(feature_name)
 
     def clone_internals(self):
         """Clone the internal state of the state."""
         rv = super().clone_internals()
-        if 'ditry_features' in rv:
-            rv['ditry_features'] = rv['ditry_features'].copy()
+        if 'dirty_features' in rv:
+            rv['dirty_features'] = rv['dirty_features'].copy()
 
     def simple_quantize(self, domain: Domain, features=None) -> 'State':
         """Make a quantized version of the state.

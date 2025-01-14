@@ -12,7 +12,7 @@ import numpy as np
 from typing import Optional, Union, Iterator, Sequence, Tuple, List
 
 from concepts.math.rotationlib_xyzw import slerp, normalize_vector
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface
 from concepts.dm.crowhat.manipulation_utils.pose_utils import angle_distance
 from concepts.utils.typing_utils import Vec3f, Vec4f, VecNf
 
@@ -26,8 +26,8 @@ __all__ = [
 
 
 def gen_synchronized_collision_free_qpos_path_from_current_qpos_and_ee_path(
-    robot1: SingleArmMotionPlanningInterface, robot1_waypoints: Sequence[Tuple[Vec3f, Vec4f]],
-    robot2: SingleArmMotionPlanningInterface, robot2_waypoints: Sequence[Tuple[Vec3f, Vec4f]],
+    robot1: SingleGroupMotionPlanningInterface, robot1_waypoints: Sequence[Tuple[Vec3f, Vec4f]],
+    robot2: SingleGroupMotionPlanningInterface, robot2_waypoints: Sequence[Tuple[Vec3f, Vec4f]],
     *,
     first_qpos1: Optional[VecNf] = None, first_qpos2: Optional[VecNf] = None,
     nr_ik_attempts: int = 1, max_joint_distance_between_waypoints: float = float('inf'),
@@ -103,8 +103,8 @@ def gen_synchronized_collision_free_qpos_path_from_current_qpos_and_ee_path(
 
 
 def gen_synchronized_collision_free_qpos_path_from_current_qpos_and_ee_linear_path(
-    robot1: SingleArmMotionPlanningInterface, robot1_target_pos1: Vec3f, robot1_target_pos2: Vec3f,
-    robot2: SingleArmMotionPlanningInterface, robot2_target_pos1: Vec3f, robot2_target_pos2: Vec3f,
+    robot1: SingleGroupMotionPlanningInterface, robot1_target_pos1: Vec3f, robot1_target_pos2: Vec3f,
+    robot2: SingleGroupMotionPlanningInterface, robot2_target_pos1: Vec3f, robot2_target_pos2: Vec3f,
     *,
     first_qpos1: Optional[VecNf] = None, first_qpos2: Optional[VecNf] = None,
     robot1_ee_dir: Optional[Vec3f] = (0, 0, -1), robot1_ee_dir2: Optional[Vec3f] = (1, 0, 0),
@@ -133,7 +133,7 @@ def gen_synchronized_collision_free_qpos_path_from_current_qpos_and_ee_linear_pa
     )
 
 
-def calc_synchronized_smooth_qpos_path_from_qpos_path(robot1: SingleArmMotionPlanningInterface, robot2: SingleArmMotionPlanningInterface, qt1: Optional[List[VecNf]], qt2: Optional[List[VecNf]]):
+def calc_synchronized_smooth_qpos_path_from_qpos_path(robot1: SingleGroupMotionPlanningInterface, robot2: SingleGroupMotionPlanningInterface, qt1: Optional[List[VecNf]], qt2: Optional[List[VecNf]]):
     if qt1 is None or qt2 is None:
         return None, None
 
@@ -161,7 +161,7 @@ def calc_synchronized_smooth_qpos_path_from_qpos_path(robot1: SingleArmMotionPla
     return smooth_qt1, smooth_qt2
 
 
-def wrap_iterator_sync_smooth_qpos_path(robot1: SingleArmMotionPlanningInterface, robot2: SingleArmMotionPlanningInterface, qts_iterator: Iterator[Tuple[List[VecNf], List[VecNf]]]) -> Iterator[Tuple[List[VecNf], List[VecNf]]]:
+def wrap_iterator_sync_smooth_qpos_path(robot1: SingleGroupMotionPlanningInterface, robot2: SingleGroupMotionPlanningInterface, qts_iterator: Iterator[Tuple[List[VecNf], List[VecNf]]]) -> Iterator[Tuple[List[VecNf], List[VecNf]]]:
     for qts in qts_iterator:
         yield calc_synchronized_smooth_qpos_path_from_qpos_path(robot1, robot2, qts[0], qts[1])
 

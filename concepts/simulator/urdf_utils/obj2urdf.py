@@ -18,7 +18,14 @@ import numpy as np
 import tempfile
 import os
 import copy
-import trimesh
+
+trimesh_available = True
+try:
+    import trimesh
+except ImportError:
+    trimesh_available = False
+    trimesh = None
+
 import xml.etree.ElementTree as ET
 
 from scipy.spatial.transform import Rotation
@@ -28,6 +35,9 @@ __all__ = ['ObjectUrdfBuilder']
 
 class ObjectUrdfBuilder(object):
     def __init__(self, object_folder, log_file=None, urdf_prototype=None, use_trimesh_vhacd: bool = True, use_pybullet_vhacd: bool = True):
+        if not trimesh_available:
+            raise ImportError('trimesh is not available. Please install trimesh to use this module.')
+
         self.object_folder = os.path.abspath(object_folder)
 
         if log_file is not None:
@@ -108,7 +118,7 @@ class ObjectUrdfBuilder(object):
 
     # Do a convex decomposition
     def do_vhacd(self, filename, outfile, debug=False, **kwargs):
-        if self.use_trimesh_vhacd:
+        if trimesh_available and self.use_trimesh_vhacd:
             try:
                 mesh = trimesh.load(filename)
                 convex_list = trimesh.interfaces.vhacd.convex_decomposition(mesh, debug=debug, **kwargs)
@@ -147,7 +157,6 @@ class ObjectUrdfBuilder(object):
 
     # Replace several attributes in a feild of a URDF
     def replace_urdf_attributes(self, urdf, feild, attribute_dict, sub_feild=None):
-
         if sub_feild is None:
             sub_feild = []
 
@@ -292,8 +301,8 @@ class ObjectUrdfBuilder(object):
         else:
             mass_center = None
 
-        mesh = trimesh.load(filename)
-        print(mesh.bounds)
+        # mesh = trimesh.load(filename)
+        # print(mesh.bounds)
 
         # If the user wants to run convex decomposition on concave objects, do it.
         if decompose_concave:

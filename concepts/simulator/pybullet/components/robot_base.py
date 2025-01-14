@@ -15,7 +15,7 @@ import contextlib
 import numpy as np
 from typing import Optional, Union, Iterable, Sequence, Tuple, List, Dict, Callable
 
-import pybullet
+import pybullet as pb
 
 from jacinle.logging import get_logger
 from jacinle.utils.enum import JacEnum
@@ -24,7 +24,7 @@ from jacinle.utils.meta import cond_with
 from concepts.algorithm.configuration_space import BoxConfigurationSpace, CollisionFreeProblemSpace
 from concepts.algorithm.rrt.rrt import birrt
 from concepts.math.range import Range
-from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate
+from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate, quat_diff
 from concepts.math.frame_utils_xyzw import get_transform_a_to_b, calc_ee_quat_from_directions
 from concepts.utils.typing_utils import Vec3f, Vec4f
 
@@ -61,6 +61,8 @@ GripperObjectIndices = Dict[str, List[int]]
 class IKMethod(JacEnum):
     PYBULLET = 'pybullet'
     IKFAST = 'ikfast'
+    TRACIK = 'tracik'
+    SCIPY = 'scipy'
 
 
 class BulletRobotBase(BulletComponent):
@@ -89,7 +91,7 @@ class BulletRobotBase(BulletComponent):
     def set_suppress_warnings(self, value: bool = True):
         self.warnings_suppressed = value
 
-    def register_action(self, name: str, func: Callable, interface: Optional[str] = None) -> None:
+    def register_action_controller(self, name: str, func: Callable, interface: Optional[str] = None) -> None:
         """Register an action primitive.
 
         Args:
@@ -119,8 +121,13 @@ class BulletRobotBase(BulletComponent):
         assert (self.current_interface, action_name) in self.primitive_actions, f'Action primitive {action_name} for interface {self.current_interface} not registered.'
         return self.primitive_actions[(self.current_interface, action_name)](*args, **kwargs)
 
-    def set_ik_method(self, ik_method: Union[str, IKMethod]):
-        self.ik_method = IKMethod.from_string(ik_method)
+    def is_qpos_valid(self, qpos: np.ndarray):
+        """Check if the joint configuration is valid."""
+        return True
+
+    def get_body_name(self) -> str:
+        """Get the name of the robot body."""
+        return self.body_name
 
     def get_body_id(self) -> int:
         """Get the pybullet body ID of the robot.
@@ -143,10 +150,6 @@ class BulletRobotBase(BulletComponent):
         """Get the home joint configuration."""
         raise NotImplementedError()
 
-    def reset_home_qpos(self):
-        """Reset the home joint configuration."""
-        raise NotImplementedError()
-
     def get_joint_limits(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get the joint limits.
 
@@ -158,6 +161,9 @@ class BulletRobotBase(BulletComponent):
         lower_limits = np.array([joint.joint_lower_limit for joint in joint_info])
         upper_limits = np.array([joint.joint_upper_limit for joint in joint_info])
         return lower_limits, upper_limits
+
+    def get_link_index(self, name: str) -> int:
+        return self.client.w.get_link_index_with_body(self.get_body_id(), name)
 
     def get_dof(self) -> int:
         """Get the total degrees of freedom of the robot.
@@ -183,13 +189,17 @@ class BulletRobotBase(BulletComponent):
         """
         self.client.w.set_batched_qpos_by_id(self.get_body_id(), self.get_joint_ids(), qpos)
 
-    def set_qpos_with_holding(self, qpos: np.ndarray) -> None:
+    def set_qpos_with_attached_objects(self, qpos: np.ndarray) -> None:
         """Set the joint configuration with the gripper holding the object.
 
         Args:
             qpos: Joint configuration.
         """
         return self.set_qpos(qpos)
+
+    def reset_home_qpos(self):
+        """Reset the home joint configuration."""
+        raise NotImplementedError()
 
     def get_qvel(self) -> np.ndarray:
         """Get the current joint velocity.
@@ -206,6 +216,28 @@ class BulletRobotBase(BulletComponent):
             Tuple[np.ndarray, np.ndarray]: 3D position and 4D quaternion of the robot body.
         """
         state = self.client.w.get_body_state_by_id(self.get_body_id())
+        return np.array(state.position), np.array(state.orientation)
+
+    def set_body_pose(self, pos: np.ndarray, quat: np.ndarray) -> None:
+        """Set the pose of the robot body.
+
+        Args:
+            pos: 3D position of the robot body.
+            quat: 4D quaternion of the robot body.
+        """
+        self.client.w.set_body_state2_by_id(self.get_body_id(), pos, quat)
+
+    def set_ik_method(self, ik_method: Union[str, IKMethod]):
+        self.ik_method = IKMethod.from_string(ik_method)
+
+    def get_link_pose(self, name_or_index: Union[str, int]) -> Tuple[np.ndarray, np.ndarray]:
+        """Get the pose of one of the links."""
+        if isinstance(name_or_index, str):
+            link_index = self.client.w.get_link_index_with_body(self.get_body_id(), name_or_index)
+        else:
+            link_index = name_or_index
+
+        state = self.client.w.get_link_state_by_id(self.get_body_id(), link_index, fk=True)
         return np.array(state.position), np.array(state.orientation)
 
 
@@ -229,6 +261,10 @@ class BulletArmRobotBase(BulletRobotBase):
         super().__init__(client, body_name, gripper_objects, current_interface, ik_method)
         self.use_magic_gripper = use_magic_gripper
         self.gripper_constraint = None
+
+    def get_urdf_filename(self) -> str:
+        """Get the URDF filename of the robot."""
+        raise NotImplementedError()
 
     def get_full_joint_ids(self) -> Sequence[int]:
         """Get the pybullet joint IDs of the robot, including the gripper joints.
@@ -293,6 +329,10 @@ class BulletArmRobotBase(BulletRobotBase):
             int: Link ID of the robot end effector.
         """
         raise NotImplementedError()
+
+    def get_ee_link_name(self) -> str:
+        """Get the name of the end effector link."""
+        return self.world.get_link_name(self.get_body_id(), self.get_ee_link_id())
 
     def get_ee_home_pos(self) -> np.ndarray:
         """Get the home position of the end effector."""
@@ -420,7 +460,7 @@ class BulletArmRobotBase(BulletRobotBase):
             return self.ik_pybullet(pos, quat, force=force, verbose=verbose)
         elif self.ik_method is IKMethod.IKFAST:
             assert force is False, 'force is not supported in ik_fast'
-            return self.ikfast(pos, quat, max_distance=max_distance, max_attempts=max_attempts, verbose=verbose)
+            return self.ikfast(pos, quat, max_distance=max_distance, max_attempts=max_attempts, verbose=verbose, error_on_fail=False)
 
     def ik_pybullet(self, pos: np.ndarray, quat: np.ndarray, force: bool = False, pos_tol: float = 1e-2, quat_tol: float = 1e-2, verbose: bool = False) -> Optional[np.ndarray]:
         """Inverse kinematics using pybullet.
@@ -633,7 +673,7 @@ class BulletArmRobotBase(BulletRobotBase):
                 return True, path[0]
             return False, None
 
-    def set_arm_joint_position_control(self, target_qpos: np.ndarray, control_mode: int = pybullet.POSITION_CONTROL, gains: float = 0.3, set_gripper_control: bool = True):
+    def set_arm_joint_position_control(self, target_qpos: np.ndarray, control_mode: int = pb.POSITION_CONTROL, gains: float = 0.3, set_gripper_control: bool = True):
         """Set the arm joint position control.
 
         Args:
@@ -798,7 +838,7 @@ class BulletArmRobotBase(BulletRobotBase):
         for i, target_qpos in enumerate(qpos_trajectory):
             if verbose:
                 logger.info(f'{self.body_name}: Moving to qpos: {target_qpos}. Trajectory replay {i + 1}/{len(qpos_trajectory)}.')
-            self.set_qpos_with_holding(target_qpos)
+            self.set_qpos_with_attached_objects(target_qpos)
             self.client.wait_for_duration(0.1)
             # input('Press enter to continue.')
 
@@ -814,14 +854,14 @@ class BulletArmRobotBase(BulletRobotBase):
 
         ee_pose = self.world.get_link_state_by_id(self.get_body_id(), ee_link, fk=True)
         obj_pose = self.p.getBasePositionAndOrientation(object_id)
-        ee_to_world = pybullet.invertTransform(ee_pose[0], ee_pose[1])
-        ee_to_object = pybullet.multiplyTransforms(ee_to_world[0], ee_to_world[1], obj_pose[0], obj_pose[1])
+        ee_to_world = pb.invertTransform(ee_pose[0], ee_pose[1])
+        ee_to_object = pb.multiplyTransforms(ee_to_world[0], ee_to_world[1], obj_pose[0], obj_pose[1])
         self.gripper_constraint = self.p.createConstraint(
             parentBodyUniqueId=self.get_body_id(),
             parentLinkIndex=ee_link,
             childBodyUniqueId=object_id,
             childLinkIndex=-1,  # should be the link index of the contact link.
-            jointType=pybullet.JOINT_FIXED,
+            jointType=pb.JOINT_FIXED,
             jointAxis=(0, 0, 0),
             parentFramePosition=ee_to_object[0],
             parentFrameOrientation=ee_to_object[1],
@@ -829,7 +869,7 @@ class BulletArmRobotBase(BulletRobotBase):
             childFrameOrientation=(0, 0, 0)
         )
 
-    def set_qpos_with_holding(self, qpos: np.ndarray) -> None:
+    def set_qpos_with_attached_objects(self, qpos: np.ndarray) -> None:
         self.set_qpos(qpos)
         if self.gripper_constraint is not None:
             # TODO(Jiayuan Mao @ 2023/03/02): should consider the actual link that the gripper is attached to, and self-collision, etc.
@@ -841,16 +881,25 @@ class BulletArmRobotBase(BulletRobotBase):
             ee_link = self.get_ee_link_id()
             ee_pose = self.world.get_link_state_by_id(self.get_body_id(), ee_link, fk=True)
             ee_to_object = (parent_frame_pos, parent_frame_orn)
-            obj_pose = pybullet.multiplyTransforms(ee_pose[0], ee_pose[1], *ee_to_object)
+            obj_pose = pb.multiplyTransforms(ee_pose[0], ee_pose[1], *ee_to_object)
             self.w.set_body_state2_by_id(other_body_id, obj_pose[0], obj_pose[1])
 
-    def attach_object(self, object_id: int, ee_to_object: Tuple[np.ndarray, np.ndarray]) -> None:
+    def attach_object(self, object_id: Union[str, int], ee_to_object: Optional[Tuple[np.ndarray, np.ndarray]], simulate_gripper: bool = True) -> None:
         assert self.use_magic_gripper, 'The magic gripper is not enabled.'
         assert self.gripper_constraint is None, 'The gripper is already attached to an object.'
 
-        object_to_ee = pybullet.invertTransform(ee_to_object[0], ee_to_object[1])
-        world_to_ee = self.world.get_link_state_by_id(self.get_body_id(), self.get_ee_link_id(), fk=True)
-        world_to_object = pybullet.multiplyTransforms(world_to_ee[0], world_to_ee[1], *object_to_ee)
+        if isinstance(object_id, str):
+            object_id = self.world.get_body_index(object_id)
+
+        if ee_to_object is None:
+            ee_to_object = get_transform_a_to_b(
+                *self.get_ee_pose(fk=True),
+                *self.world.get_body_state_by_id(object_id).get_transformation()
+            )
+
+        # object_to_ee = pb.invertTransform(ee_to_object[0], ee_to_object[1])
+        world_to_ee = self.get_ee_pose(fk=True)
+        world_to_object = pb.multiplyTransforms(world_to_ee[0], world_to_ee[1], *ee_to_object)
         self.w.set_body_state2_by_id(object_id, world_to_object[0], world_to_object[1])
 
         # NB(Jiayuan Mao @ 2024/08/2): We will first create a constraint between the gripper and the object --- this ensures that the object will stay the same when the gripper moves.
@@ -858,7 +907,6 @@ class BulletArmRobotBase(BulletRobotBase):
 
     def detach_object(self) -> None:
         assert self.use_magic_gripper, 'The magic gripper is not enabled.'
-        assert self.gripper_constraint is not None, 'The gripper is not attached to any object.'
 
         if self.gripper_constraint is not None:
             self.client.p.removeConstraint(self.gripper_constraint)
@@ -878,6 +926,394 @@ class BulletArmRobotBase(BulletRobotBase):
             return parent_frame_pos, parent_frame_orn
         return None
 
+
+class BulletMultiChainRobotRobotBase(BulletRobotBase):
+    """Base class for humanoid robots, such as RBY1A, etc."""
+
+    def __init__(
+        self,
+        client: BulletClient,
+        body_name: Optional[str] = None,
+        gripper_objects: Optional[GripperObjectIndices] = None,
+        current_interface='pybullet',
+        ik_method: Union[str, IKMethod] = 'pybullet',
+        use_magic_gripper: bool = True,
+    ):
+        super().__init__(client, body_name, gripper_objects, current_interface, ik_method)
+        self.use_magic_gripper = use_magic_gripper
+        self.gripper_constraints = dict()
+        self.gripper_states = dict()
+        self.joint_groups = dict()
+        self.joint_groups_names = dict()
+        self.joint_groups_ee_link_ids = dict()
+        self.joint_groups_start_index = dict()
+        self._joint_name_to_state_index = None
+
+    joint_groups: Dict[str, Tuple[int, ...]]
+    """Joint groups of the robot. Each entry is represented as a tuple of joint indices in PyBullet."""
+
+    joint_groups_names: Dict[str, List[str]]
+    """Joint names of each joint in the joint groups."""
+
+    joint_groups_ee_link_ids: Dict[str, int]
+    """End effector link IDs of each joint groups."""
+
+    joint_groups_start_index: Dict[str, Union[int, List[int]]]
+    """Start index of each joint groups. This is the first joint index in a full qpos array (which contains only movable joints)."""
+
+    def define_joint_groups(self, group_name: str, joint_indices: Sequence[int], ee_link_id: Optional[int] = None, start_index: Union[int, List[int]] = 0) -> None:
+        self.joint_groups[group_name] = tuple(joint_indices)
+        self.joint_groups_names[group_name] = [self.client.w.get_joint_info_by_id(self.get_body_id(), i).joint_name.decode('utf-8') for i in joint_indices]
+        if ee_link_id is not None:
+            self.joint_groups_ee_link_ids[group_name] = ee_link_id
+        self.joint_groups_start_index[group_name] = start_index
+
+    @property
+    def joint_name_to_state_index(self):
+        if self._joint_name_to_state_index is None:
+            self.init_joint_name_to_state_index()
+        return self._joint_name_to_state_index
+
+    def init_joint_name_to_state_index(self):
+        joints = self.world.get_joint_info_by_body(self.get_body_id())
+        non_stationary_joints = [j for j in joints if j.joint_type != pb.JOINT_FIXED]
+        self._joint_name_to_state_index = {
+            j.joint_name.decode('utf-8'): i for i, j in enumerate(non_stationary_joints)
+        }
+
+    def get_joint_ids(self, group_name: str = '__all__') -> Sequence[int]:
+        """Get the pybullet joint IDs of the robot.
+
+        Returns:
+            Sequence[int]: Joint IDs of the robot.
+        """
+        return self.joint_groups[group_name]
+
+    def get_joint_names(self, group_name: str = '__all__') -> List[str]:
+        """Get the joint names of the robot.
+
+        Returns:
+            List[str]: Joint names of the robot.
+        """
+        return self.joint_groups_names[group_name]
+
+    def get_dof(self, group_name: str = '__all__') -> int:
+        """Get the total degrees of freedom of the robot.
+
+        Returns:
+            int: Total degrees of freedom.
+        """
+        return len(self.joint_groups[group_name])
+
+    def get_joint_limits(self, group_name: str = '__all__') -> Tuple[np.ndarray, np.ndarray]:
+        """Get the joint limits."""
+        body_id = self.get_body_id()
+        joint_info = [self.client.w.get_joint_info_by_id(body_id, i) for i in self.get_joint_ids(group_name)]
+        lower_limits = np.array([joint.joint_lower_limit for joint in joint_info])
+        upper_limits = np.array([joint.joint_upper_limit for joint in joint_info])
+        return lower_limits, upper_limits
+
+    def get_qpos(self, group_name: str = '__all__') -> np.ndarray:
+        """Get the current joint configuration."""
+        return self.client.w.get_batched_qpos_by_id(self.get_body_id(), self.get_joint_ids(group_name))
+
+    def set_qpos(self, qpos: np.ndarray, group_name: str = '__all__', update_attached_objects: bool = True) -> None:
+        """Set the joint configuration."""
+        self.client.w.set_batched_qpos_by_id(self.get_body_id(), self.get_joint_ids(group_name), qpos)
+        if update_attached_objects:
+            self._update_attached_objects_after_qpos_update()
+
+    def get_qpos_nameddict(self, group_name: str = '__all__') -> Dict[str, np.ndarray]:
+        """Get the current joint configuration."""
+        qpos = self.get_qpos(group_name)
+        names = self.get_joint_names(group_name)
+        return {name: qpos[i] for i, name in enumerate(names)}
+
+    def set_qpos_nameddict(self, qpos_dict: Dict[str, np.ndarray], group_name: str = '__all__', update_attached_objects: bool = True) -> None:
+        """Set the joint configuration."""
+        all_names = self.get_joint_names(group_name)
+        all_ids = self.get_joint_ids(group_name)
+        name2id = {name: i for i, name in enumerate(all_names)}
+        ids = [name2id[name] for name in qpos_dict.keys()]
+        self.client.w.set_batched_qpos_by_id(self.get_body_id(), [all_ids[i] for i in ids], list(qpos_dict.values()))
+        if update_attached_objects:
+            self._update_attached_objects_after_qpos_update()
+
+    def get_qpos_groupdict(self) -> Dict[str, np.ndarray]:
+        """Get the current joint configuration."""
+        qpos = self.get_qpos()
+        return {k: self.index_full_joint_state_group(qpos, k) for k in self.joint_groups.keys()}
+
+    def set_qpos_groupdict(self, qpos_dict: Dict[str, np.ndarray], update_attached_objects: bool = True) -> None:
+        """Set the joint configuration."""
+        for group_name, qpos in qpos_dict.items():
+            self.set_qpos(qpos, group_name)
+        if update_attached_objects:
+            self._update_attached_objects_after_qpos_update()
+
+    def set_qpos_with_attached_objects(self, qpos: np.ndarray) -> None:
+        self.set_qpos(qpos)
+        self._update_attached_objects_after_qpos_update()
+
+    def _update_attached_objects_after_qpos_update(self):
+        for ee_link_id, constraint in self.gripper_constraints.items():
+            # TODO(Jiayuan Mao @ 2023/03/02): should consider the actual link that the gripper is attached to, and self-collision, etc.
+            constraint = self.p.getConstraintInfo(constraint)
+            other_body_id = constraint[2]
+            parent_frame_pos = constraint[6]
+            parent_frame_orn = constraint[8]
+
+            ee_pose = self.world.get_link_state_by_id(self.get_body_id(), ee_link_id, fk=True)
+            ee_to_object = (parent_frame_pos, parent_frame_orn)
+            obj_pose = pb.multiplyTransforms(ee_pose[0], ee_pose[1], *ee_to_object)
+            self.w.set_body_state2_by_id(other_body_id, obj_pose[0], obj_pose[1])
+
+    def get_qvel(self, group_name: str = '__all__') -> np.ndarray:
+        """Get the current joint velocity."""
+        return self.client.w.get_batched_qvel_by_id(self.get_body_id(), self.get_joint_ids(group_name))
+
+    def get_ee_link_id(self, group_name: str = '__all__') -> int:
+        """Get the pybullet link ID of the robot end effector."""
+        return self.joint_groups_ee_link_ids[group_name]
+
+    def get_ee_pose(self, group_name: str = '__all__', fk: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        """Get the pose of the end effector."""
+        state = self.client.w.get_link_state_by_id(self.get_body_id(), self.get_ee_link_id(group_name), fk=fk)
+        return np.array(state.position), np.array(state.orientation)
+
+    def get_ee_velocity(self, group_name: str = '__all__', fk: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        """Get the velocity of the end effector."""
+        state = self.client.w.get_link_state_by_id(self.get_body_id(), self.get_ee_link_id(group_name), fk=fk)
+        return np.array(state.linear_velocity), np.array(state.angular_velocity)
+
+    def set_ee_pose(self, pos: np.ndarray, quat: np.ndarray, group_name: Optional[str] = None) -> bool:
+        """Set the pose of the end effector by inverse kinematics. Return True if the IK solver succeeds."""
+        qpos = self.ik(pos, quat, link_name_or_id=self.get_ee_link_id(group_name))
+        if qpos is None:
+            return False
+        self.set_qpos(qpos)
+        return True
+
+    def get_ee_default_quat(self, group_name: Optional[str] = None) -> np.ndarray:
+        """Get the default orientation of the end effector."""
+        raise NotImplementedError()
+
+    def get_ee_link_default_quat(self, ee_link_id):
+        raise NotImplementedError()
+
+    def get_ee_quat_from_vectors(self, u: Vec3f = (-1., 0., 0.), v: Vec3f = (1., 0., 0.), group_name: Optional[str] = None) -> Vec4f:
+        """Compute the quaternion from two directions (the "down" direction for the end effector and the "forward" direction for the end effector)."""
+        return calc_ee_quat_from_directions(u, v, self.get_ee_default_quat(group_name))
+
+    def get_jacobian(self, qpos: Optional[np.ndarray] = None, link_id: Optional[int] = None, group_name: str = '__all__') -> np.ndarray:
+        """Get the Jacobian matrix.
+
+        Args:
+            qpos: Joint configuration.
+            link_id: id of the link. If not specified, the Jacobian of the end effector is returned.
+            group_name: name of the joint group.
+
+        Returns:
+            np.ndarray: Jacobian matrix. The shape is (6, nr_moveable_joints).
+        """
+        if link_id is None:
+            link_id = self.get_ee_link_id(group_name=group_name)
+
+        if qpos is None:
+            qpos = self.get_qpos()
+
+        linear_jacobian, angular_jacobian = self.client.p.calculateJacobian(
+            bodyUniqueId=self.get_body_id(), linkIndex=link_id,
+            localPosition=[0.0, 0.0, 0.0],
+            objPositions=qpos.tolist(), objVelocities=np.zeros_like(qpos).tolist(), objAccelerations=np.zeros_like(qpos).tolist()
+        )
+
+        jacobian = np.vstack([np.array(linear_jacobian), np.array(angular_jacobian)])
+        return jacobian
+
+    def get_mass_matrix(self, qpos: Optional[np.ndarray] = None) -> np.ndarray:
+        """Get the mass matrix.
+
+        Args:
+            qpos: Joint configuration.
+
+        Returns:
+            np.ndarray: Mass matrix.
+        """
+        if qpos is None:
+            qpos = self.get_qpos()
+
+        mass_matrix = self.client.p.calculateMassMatrix(self.get_body_id(), qpos.tolist())
+        mass_matrix = np.array(mass_matrix)
+        if mass_matrix.shape[0] > self.get_dof():
+            mass_matrix = mass_matrix[:self.get_dof(), :self.get_dof()]
+        return mass_matrix
+
+    def get_coriolis_torque(self, qpos: Optional[np.ndarray] = None, qvel: Optional[np.ndarray] = None) -> np.ndarray:
+        """Get the Coriolis torque.
+
+        Args:
+            qpos: Joint configuration.
+            qvel: Joint velocity.
+
+        Returns:
+            np.ndarray: Coriolis torque.
+        """
+        if qpos is None:
+            qpos = self.get_qpos()
+        if qvel is None:
+            qvel = self.get_qvel()
+
+        qddot = self.client.p.calculateInverseDynamics(self.get_body_id(), qpos.tolist(), qvel.tolist(), np.zeros_like(qvel).tolist())
+        qddot = np.array(qddot)
+        return qddot
+
+    def fk(self, qpos: np.ndarray, link_name_or_id: Optional[Union[str, int]] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """Forward kinematics."""
+
+        robot_id = self.get_body_id()
+        with BodyFullStateSaver(self.client.w, robot_id):
+            self.set_qpos(qpos)
+            if link_name_or_id is None:
+                return self.get_ee_pose(fk=True)
+            elif isinstance(link_name_or_id, str):
+                state = self.client.w.get_link_state(link_name_or_id, fk=True)
+                return np.array(state.position), np.array(state.orientation)
+            elif isinstance(link_name_or_id, int):
+                state = self.client.w.get_link_state_by_id(robot_id, link_name_or_id, fk=True)
+                return np.array(state.position), np.array(state.orientation)
+            else:
+                raise TypeError(f'link_name_or_id must be str or int, got {type(link_name_or_id)}.')
+
+    def differential_ik(self, pos: np.ndarray, quat: np.ndarray, link_name_or_id: Union[str, int], last_qpos: np.ndarray):
+        """Differential inverse kinematics."""
+
+        if isinstance(link_name_or_id, str):
+            link_name_or_id = self.client.w.get_link_index_with_body(self.get_body_id(), link_name_or_id)
+
+        current_pos, current_quat = self.fk(last_qpos, link_name_or_id)
+        J = self.get_jacobian(last_qpos, link_name_or_id)  # 6 x N
+
+        # solution = np.linalg.lstsq(J, pose_difference((current_pos, current_quat), (pos, quat)), rcond=None)[0]
+        solution = np.linalg.pinv(J) @ pose_difference((current_pos, current_quat), (pos, quat))
+        rv = last_qpos + solution
+        L, U = self.get_joint_limits()
+        rv = np.clip(rv, L, U)
+
+        return rv
+
+    def ik(self, pos: np.ndarray, quat: np.ndarray, link_name_or_id: Union[str, int], last_qpos: Optional[np.ndarray] = None, force: bool = False, max_distance: float = float('inf'), max_attempts: int = 50, verbose: bool = False) -> Optional[Union[np.ndarray, Dict[str, np.ndarray]]]:
+        """Inverse kinematics."""
+
+        link_id = link_name_or_id if isinstance(link_name_or_id, int) else self.client.w.get_link_index_with_body(self.get_body_id(), link_name_or_id)
+
+        if self.ik_method is IKMethod.PYBULLET:
+            assert max_distance == float('inf'), 'max_distance is not supported in PyBullet IK'
+            return self.ik_pybullet(pos, quat, link_id, force=force, verbose=verbose)
+        elif self.ik_method is IKMethod.IKFAST:
+            assert force is False, 'force is not supported in ik_fast'
+            return self.ikfast(pos, quat, link_id, last_qpos=last_qpos, max_distance=max_distance, max_attempts=max_attempts, verbose=verbose)
+        elif self.ik_method is IKMethod.TRACIK:
+            return self.ik_tracik(pos, quat, link_id, last_qpos=last_qpos, max_distance=max_distance, max_attempts=max_attempts, verbose=verbose)
+        elif self.ik_method is IKMethod.SCIPY:
+            return self.ik_scipy(pos, quat, link_id, last_qpos=last_qpos, max_distance=max_distance, max_attempts=max_attempts, verbose=verbose)
+        else:
+            raise ValueError(f'Invalid IK method: {self.ik_method}')
+
+    def ik_pybullet(self, pos: np.ndarray, quat: np.ndarray, link_id: int, force: bool = False, pos_tol: float = 1e-2, quat_tol: float = 1e-2, verbose: bool = False) -> Optional[np.ndarray]:
+        raise NotImplementedError()
+
+    def ikfast(self, pos: np.ndarray, quat: np.ndarray, link_id: int, last_qpos: Optional[np.ndarray] = None, max_attempts: int = 50, max_distance: float = float('inf'), error_on_fail: bool = True, verbose: bool = False) -> Optional[np.ndarray]:
+        raise NotImplementedError()
+
+    def ik_tracik(self, pos: np.ndarray, quat: np.ndarray, link_id: int, last_qpos: Optional[np.ndarray] = None, max_distance: float = float('inf'), max_attempts: int = 50, verbose: bool = False) -> Optional[np.ndarray]:
+        raise NotImplementedError()
+
+    def ik_scipy(self, pos: np.ndarray, quat: np.ndarray, link_id: int, last_qpos: Optional[np.ndarray] = None, max_distance: float = float('inf'), max_attempts: int = 50, verbose: bool = False) -> Optional[np.ndarray]:
+        raise NotImplementedError()
+
+    def index_full_joint_state_group(self, array: np.ndarray, group_name: str) -> np.ndarray:
+        """Index the full joint state to the group joint state."""
+        start_index = self.joint_groups_start_index[group_name]
+        return array[start_index:start_index + self.get_dof(group_name)]
+
+    def set_index_full_joint_state_group_dict(self, full_array: np.ndarray, group_values: Dict[str, np.ndarray]) -> np.ndarray:
+        """Set the group joint state to the full joint state."""
+        full_array = full_array.copy()
+        for group_name, values in group_values.items():
+            start_index = self.joint_groups_start_index[group_name]
+            if isinstance(start_index, int):
+                full_array[start_index:start_index + self.get_dof(group_name)] = values
+            else:
+                full_array[start_index] = values
+        return full_array
+
+    def index_full_joint_state_by_name(self, state: np.ndarray, names: Sequence[str]) -> np.ndarray:
+        return state[[self.joint_name_to_state_index[name] for name in names]]
+
+    def set_index_full_joint_state_by_name(self, state: np.ndarray, name2value: Dict[str, float]) -> np.ndarray:
+        state = state.copy()
+        for name, value in name2value.items():
+            state[self.joint_name_to_state_index[name]] = value
+        return state
+
+    def create_gripper_constraint(self, ee_id: int, object_id: int, verbose: bool = False):
+        if ee_id in self.gripper_constraints:
+            self.client.p.removeConstraint(self.gripper_constraints[ee_id])
+            del self.gripper_constraints[ee_id]
+
+        if verbose:
+            logger.info(f'{self.body_name}: Creating constraint between {self.get_body_id()} and {object_id}.')
+
+        ee_pose = self.world.get_link_state_by_id(self.get_body_id(), ee_id, fk=True)
+        obj_pose = self.p.getBasePositionAndOrientation(object_id)
+        ee_to_world = pb.invertTransform(ee_pose[0], ee_pose[1])
+        ee_to_object = pb.multiplyTransforms(ee_to_world[0], ee_to_world[1], obj_pose[0], obj_pose[1])
+        self.gripper_constraints[ee_id] = self.p.createConstraint(
+            parentBodyUniqueId=self.get_body_id(),
+            parentLinkIndex=ee_id,
+            childBodyUniqueId=object_id,
+            childLinkIndex=-1,  # should be the link index of the contact link.
+            jointType=pb.JOINT_FIXED,
+            jointAxis=(0, 0, 0),
+            parentFramePosition=ee_to_object[0],
+            parentFrameOrientation=ee_to_object[1],
+            childFramePosition=(0, 0, 0),
+            childFrameOrientation=(0, 0, 0)
+        )
+
+    def attach_object(self, ee_id: int, object_id: int, ee_to_object: Tuple[np.ndarray, np.ndarray]) -> None:
+        assert self.use_magic_gripper, 'The magic gripper is not enabled.'
+        assert ee_id not in self.gripper_constraints, 'The gripper is already attached to an object.'
+
+        object_to_ee = pb.invertTransform(ee_to_object[0], ee_to_object[1])
+        world_to_ee = self.world.get_link_state_by_id(self.get_body_id(), ee_id, fk=True)
+        world_to_object = pb.multiplyTransforms(world_to_ee[0], world_to_ee[1], *object_to_ee)
+        self.w.set_body_state2_by_id(object_id, world_to_object[0], world_to_object[1])
+
+        # NB(Jiayuan Mao @ 2024/08/2): We will first create a constraint between the gripper and the object --- this ensures that the object will stay the same when the gripper moves.
+        self.create_gripper_constraint(ee_id, object_id)
+
+    def detach_object(self, ee_id: int) -> None:
+        assert self.use_magic_gripper, 'The magic gripper is not enabled.'
+        assert ee_id in self.gripper_constraints, 'The gripper is not attached to any object.'
+
+        self.client.p.removeConstraint(self.gripper_constraints[ee_id])
+        del self.gripper_constraints[ee_id]
+
+    def get_attached_object(self, ee_id: int) -> Optional[int]:
+        if ee_id in self.gripper_constraints:
+            constraint = self.client.p.getConstraintInfo(self.gripper_constraints[ee_id])
+            return constraint[2]
+        return None
+
+    def get_attached_object_pose_in_ee_frame(self, ee_id: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        if ee_id in self.gripper_constraints:
+            constraint = self.p.getConstraintInfo(self.gripper_constraints[ee_id])
+            parent_frame_pos = constraint[6]
+            parent_frame_orn = constraint[8]
+            return parent_frame_pos, parent_frame_orn
+        return None
 
 class BulletRobotActionPrimitive(object):
     def __init__(self, robot: BulletArmRobotBase):
@@ -905,3 +1341,11 @@ class BulletRobotActionPrimitive(object):
     @property
     def warnings_suppressed(self):
         return self.robot.warnings_suppressed
+
+
+def pose_difference(pose1: Tuple[Vec3f, Vec4f], pose2: Tuple[Vec3f, Vec4f]) -> np.ndarray:
+    """Compute the difference between two poses: `pose2 - pose1`."""
+    pos1, quat1 = pose1
+    pos2, quat2 = pose2
+    axis, angle = quat_diff(quat2, quat1, return_axis=True)
+    return np.concatenate([np.asarray(pos2) - np.asarray(pos1), axis * angle])

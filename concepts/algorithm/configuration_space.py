@@ -63,15 +63,24 @@ class ProxyConfigurationSpace(ConfigurationSpace):
 
 
 class BoxConfigurationSpace(ConfigurationSpace):
-    def __init__(self, cspace_ranges, cspace_max_stepdiff):
+    MAX_REJECTION_SAMPLING_TRIALS = 100
+
+    def __init__(self, cspace_ranges, cspace_max_stepdiff, extra_validation_func=None):
         super().__init__()
         self.cspace_ranges = cspace_ranges
 
         if isinstance(cspace_max_stepdiff, (int, float)):
             cspace_max_stepdiff = (cspace_max_stepdiff,) * len(self.cspace_ranges)
         self.cspace_max_stepdiff = np.array(cspace_max_stepdiff, dtype='float32')
+        self.extra_validation_func = extra_validation_func
 
     def sample(self):
+        if self.extra_validation_func is not None:
+            for i in range(self.MAX_REJECTION_SAMPLING_TRIALS):
+                sample = tuple(r.sample() for r in self.cspace_ranges)
+                if self.extra_validation_func(sample):
+                    return sample
+            raise ValueError(f'Unable to produce a sample after {self.MAX_REJECTION_SAMPLING_TRIALS} trials. Check your extra_validate_config_func or increase the MAX_REJECTION_SAMPLING_TRIALS.')
         return tuple(r.sample() for r in self.cspace_ranges)
 
     def difference(self, one: tuple, two: tuple):
@@ -83,9 +92,11 @@ class BoxConfigurationSpace(ConfigurationSpace):
         return sum(a)
 
     def validate_config(self, config):
-        return len(config) == len(self.cspace_ranges) and all(
-            [self.cspace_ranges[i].contains(config[i]) for i in range(len(self.cspace_ranges))]
-        )
+        if len(config) == len(self.cspace_ranges):
+            if all([self.cspace_ranges[i].contains(config[i]) for i in range(len(self.cspace_ranges))]):
+                if self.extra_validation_func is None or self.extra_validation_func(config):
+                    return True
+        return False
 
     def gen_path_l1(self, config1: tuple, config2: tuple):
         # TODO(Jiayuan Mao @ 2023/03/09): bring this back. In panda planning, sometimes the input configurations are invalid...
@@ -94,6 +105,16 @@ class BoxConfigurationSpace(ConfigurationSpace):
         samples = max([int(ceil(abs(diff) / max_diff)) + 1 for diff, max_diff in zip(diffs, self.cspace_max_stepdiff)])
         samples = max(2, samples)
         linear_interpolation = [diff / (samples - 1.0) for diff in diffs]
+
+        if all(not r.wrap_around for r in self.cspace_ranges):
+            config1 = np.asarray(config1)
+            config2 = np.asarray(config2)
+            linear_interpolation = np.asarray(linear_interpolation)
+            linspace = np.arange(0, samples)
+            path = np.outer(linspace, linear_interpolation) + config1
+            path[-1] = config2
+            return True, list(path)
+
         path = [config1]
         for s in range(1, samples - 1):
             sample = tuple(

@@ -36,6 +36,7 @@ Under the :class:`ValueOutputExpression` category, there are a few sub-categorie
 - :class:`ConditionExpression` which represents the ternary conditional expression.
 - :class:`ConditionalSelectExpression` which represents the conditional selection for some computed value.
 - :class:`DeicticSelectExpression` which represents the deictic selection for some computed value (i.e., forall quantifiers).
+- :class:`BatchedExpression` which is the expression that assigns values to state variables with batched expressions.
 
 Under the :class:`ObjectOutputExpression` category, there are a few sub-categories:
 
@@ -87,7 +88,7 @@ __all__ = [
     'FunctionApplicationError', 'FunctionApplicationExpression', 'ListFunctionApplicationExpression', 'ListExpansionExpression',
     'ConditionalSelectExpression', 'DeicticSelectExpression',
     'BoolOpType', 'BoolExpression', 'AndExpression', 'OrExpression', 'NotExpression', 'XorExpression', 'ImpliesExpression',
-    'QuantificationOpType', 'QuantificationExpression', 'GeneralizedQuantificationExpression', 'ForallExpression', 'ExistsExpression', 'FindOneExpression', 'FindAllExpression',
+    'QuantificationOpType', 'QuantificationExpression', 'GeneralizedQuantificationExpression', 'ForallExpression', 'ExistsExpression', 'BatchedExpression', 'FindOneExpression', 'FindAllExpression',
     'CompareOpType', 'ObjectCompareExpression', 'ValueCompareExpression', 'ConditionExpression',
     'PredicateEqualExpression', 'AssignExpression', 'ConditionalAssignExpression', 'DeicticAssignExpression',
     'cvt_expression', 'cvt_expression_list', 'get_type', 'get_types',
@@ -591,7 +592,6 @@ class FunctionApplicationExpression(ValueOutputExpression):
         self.function = function
         self.arguments = tuple(arguments)
         self.batch = batch
-        self.inferred_batch = batch
         self._return_type = AutoType
 
         assert batch in ['mixed', 'inner', 'outer'], f'Unknown batch type: {batch}. Allowed values are "mixed", "inner", "outer".'
@@ -995,6 +995,7 @@ class ImpliesExpression(BoolExpression):
 class QuantificationOpType(JacEnum):
     FORALL = 'forall'
     EXISTS = 'exists'
+    BATCHED = 'batched'
 
 
 class QuantificationExpression(ValueOutputExpression):
@@ -1076,6 +1077,17 @@ class ExistsExpression(QuantificationExpression):
 
     quantification_op: QuantificationOpType
     """The quantification operation. Must be :py:attr:`QuantificationOpType.EXISTS`."""
+
+    variable: Variable
+    expression: ValueOutputExpression
+
+
+class BatchedExpression(QuantificationExpression):
+    def __init__(self, variable: Variable, expr: ValueOutputExpression):
+        super().__init__(QuantificationOpType.BATCHED, variable, expr)
+
+    quantification_op: QuantificationOpType
+    """The quantification operation. Must be :py:attr:`QuantificationOpType.BATCHED`."""
 
     variable: Variable
     expression: ValueOutputExpression

@@ -19,6 +19,7 @@ __all__ = [
     'CrowDomain', 'CrowProblem', 'CrowState',
     'make_plan_serializable',
     'load_domain_file', 'load_domain_string', 'load_domain_string_incremental', 'load_problem_file', 'load_problem_string',
+    'print_cdl_terminal',
     'CrowExecutor', 'CrowPythonFunctionRef', 'CrowPythonFunctionCrossRef', 'CrowSGC', 'config_function_implementation', 'CrowGeneratorExecutor', 'wrap_singletime_function_to_iterator',
     'CrowPerceptionInterface', 'CrowObjectMemoryItem', 'CrowSimulationControllerInterface', 'CrowPhysicalControllerInterface',
     'CrowExecutionManager', 'GoalAchieved', 'CrowDefaultOpenLoopExecutionManager',
@@ -37,6 +38,7 @@ from .crow_domain import CrowDomain, CrowProblem, CrowState
 from .crow_expression_utils import make_plan_serializable
 from .parsers.cdl_parser import get_default_parser, get_default_path_resolver
 from .parsers.cdl_parser import load_domain_file, load_domain_string, load_domain_string_incremental, load_problem_file, load_problem_string
+from .parsers.cdl_formatter import print_cdl_terminal
 from .executors.crow_executor import CrowExecutor
 from .executors.python_function import CrowPythonFunctionRef, CrowPythonFunctionCrossRef, CrowSGC, config_function_implementation
 from .executors.generator_executor import CrowGeneratorExecutor, wrap_singletime_function_to_iterator

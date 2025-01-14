@@ -36,6 +36,13 @@ class BulletEnvBase(object):
         else:
             self._np_random = np_random
 
+        self.robot = None
+        self.robots = list()
+
+    def add_existing_robot(self, robot: Any):
+        self.robot = robot
+        self.robots.append(robot)
+
     @property
     def client(self) -> BulletClient:
         return self._client

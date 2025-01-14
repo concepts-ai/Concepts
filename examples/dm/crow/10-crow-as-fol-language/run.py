@@ -13,9 +13,7 @@ In this case, it is used as a first-order logic engine, and the domain is define
 """
 
 import torch
-from concepts.dsl.dsl_types import BOOL
-from concepts.dsl.tensor_value import TensorValue
-from concepts.dsl.tensor_state import StateObjectReference, StateObjectList
+import concepts.dsl.all as T
 import concepts.dm.crow as crow
 
 domain = crow.load_domain_string(f'''
@@ -64,42 +62,42 @@ motion_type_list = {
 }
 
 @crow.config_function_implementation(support_batch=False)
-def is_subject_of(motion_name: str, object_name: str) -> TensorValue:
+def is_subject_of(motion_name: str, object_name: str) -> T.TensorValue:
     return motion_subject_list[motion_name] == object_name
 
 @crow.config_function_implementation(support_batch=False)
-def is_object_of(motion_name: str, object_name: str) -> TensorValue:
+def is_object_of(motion_name: str, object_name: str) -> T.TensorValue:
     return motion_object_list[motion_name] == object_name
 
 # If you specfiy support_batch=True, the executor will internally do a for-loop over the batch dimension.
 @crow.config_function_implementation(support_batch=False)
-def is_red(object_name: str) -> TensorValue:
+def is_red(object_name: str) -> T.TensorValue:
     return object_color_list[object_name] == 'red'
 
 # You can also implement your own function that supports batch processing.
 @crow.config_function_implementation(support_batch=True)
-def is_red(object_name: str | slice) -> TensorValue:
+def is_red(object_name: str | slice) -> T.TensorValue:
     if isinstance(object_name, str):
         return object_color_list[object_name] == 'red'
-    return TensorValue.from_tensor(
+    return T.TensorValue.from_tensor(
         torch.tensor([object_color_list[on] == 'red' for on in object_color_list], dtype=torch.bool),
-        BOOL, batch_variables=['o']  # The batch variable name here need to be consistent with the function signature.
+        T.BOOL, batch_variables=['o']  # The batch variable name here need to be consistent with the function signature.
     )
 
 @crow.config_function_implementation(support_batch=False)
-def is_green(object_name: str) -> TensorValue:
+def is_green(object_name: str) -> T.TensorValue:
     return object_color_list[object_name] == 'green'
 
 @crow.config_function_implementation(support_batch=False)
-def is_blue(object_name: str) -> TensorValue:
+def is_blue(object_name: str) -> T.TensorValue:
     return object_color_list[object_name] == 'blue'
 
 @crow.config_function_implementation(support_batch=False)
-def is_push(motion_name: str) -> TensorValue:
+def is_push(motion_name: str) -> T.TensorValue:
     return motion_type_list[motion_name] == 'push'
 
 @crow.config_function_implementation(support_batch=False)
-def is_pull(motion_name: str) -> TensorValue:
+def is_pull(motion_name: str) -> T.TensorValue:
     return motion_type_list[motion_name] == 'pull'
 
 
@@ -118,13 +116,31 @@ print(executor.execute('exists m: Motion: exists x: Object: exists y: Object: is
 print(executor.execute('exists m: Motion: exists x: Object: exists y: Object: is_pull_motion(m) and is_subject_of(m, x) and is_object_of(m, y) and is_red(x) and is_blue(y)', state=state))
 print(executor.execute('findone m: Motion: exists x: Object: exists y: Object: is_push_motion(m) and is_subject_of(m, x) and is_object_of(m, y) and is_red(x) and is_blue(y)', state=state))
 
-# domain = domain.clone()
 domain.incremental_define(f'''
 def get_motion() -> Motion:
   let x = findone x: Object: is_red(x)
   let y = findone y: Object: is_blue(y)
   let m = findone m: Motion: is_push_motion(m) and is_subject_of(m, x) and is_object_of(m, y)
   return m
+''')
+print(executor.execute('get_motion()', state=state))
+del domain.functions['get_motion']
+
+domain.incremental_define(f'''
+def get_motion(m: Motion) -> bool:
+  let x = findone x: Object: is_red(x)
+  let y = findone y: Object: is_blue(y)
+  return is_push_motion(m) and is_subject_of(m, x) and is_object_of(m, y)
+''')
+print(executor.execute('get_motion(x)', state=state, bounded_variables={T.Variable('x', domain.types['Motion']): T.QINDEX}))
+del domain.functions['get_motion']
+
+domain.incremental_define(f'''
+def get_motion() -> Motion:
+  let x = findone x: Object: is_red(x)
+  let y = findone y: Object: is_blue(y)
+  let z = batched m: Motion: is_push_motion(m) and is_subject_of(m, x) and is_object_of(m, y)
+  return z
 ''')
 print(executor.execute('get_motion()', state=state))
 del domain.functions['get_motion']

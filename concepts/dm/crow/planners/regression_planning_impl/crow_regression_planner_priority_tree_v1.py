@@ -10,6 +10,7 @@
 
 import re
 import weakref
+import itertools
 from typing import Any, Optional, Union, Iterator, Tuple, NamedTuple, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
 
@@ -26,7 +27,7 @@ from concepts.dsl.tensor_state import StateObjectReference
 
 from concepts.dm.crow.controller import CrowControllerApplier, CrowControllerApplicationExpression
 from concepts.dm.crow.behavior import CrowBehaviorOrderingSuite, CrowBehaviorCommit
-from concepts.dm.crow.behavior import CrowBindExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression
+from concepts.dm.crow.behavior import CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowAchieveExpression, CrowUntrackExpression, CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression
 from concepts.dm.crow.behavior import CrowBehaviorForeachLoopSuite, CrowBehaviorWhileLoopSuite, CrowBehaviorConditionSuite, CrowEffectApplier
 from concepts.dm.crow.behavior_utils import match_applicable_behaviors, match_policy_applicable_behaviors, ApplicableBehaviorItem
 from concepts.dm.crow.behavior_utils import format_behavior_statement, format_behavior_program, execute_behavior_effect_body, execute_object_bind, execute_additive_heuristic_program
@@ -35,7 +36,7 @@ from concepts.dm.crow.planners.regression_planning import SupportedCrowExpressio
 from concepts.dm.crow.planners.regression_dependency import RegressionTraceStatement
 from concepts.dm.crow.planners.regression_utils import replace_variable_with_value, format_regression_statement
 from concepts.dm.crow.csp_solver.dpll_sampling import dpll_solve
-from concepts.dm.crow.csp_solver.csp_utils import csp_ground_action_list
+from concepts.dm.crow.csp_solver.csp_utils import csp_ground_action_list, csp_ground_state
 
 if TYPE_CHECKING:
     from concepts.dm.crow.planners.priority_impl.priority_tree_priority_fns import PriorityFunctionBase
@@ -236,8 +237,8 @@ class _SolutionFound(Exception):
 
 
 class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
-    def _post_init(self, always_commit_skeleton: bool = False, enable_state_hash: bool = True, priority_fn: str = 'fifo') -> None:
-        self.always_commit_skeleton = always_commit_skeleton
+    def _post_init(self, always_commit_skeleton: bool = False, enable_state_hash: bool = False, priority_fn: str = 'fifo') -> None:
+        # Ignroe always_commit_skeleton. It's for backward compatibility with iddfs_v1.
         self.enable_state_hash = enable_state_hash
         self.priority_fn = priority_fn
         self.priority_fn_impl = self._get_priority_fn_impl(self.priority_fn)
@@ -249,7 +250,6 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
 
     _queue: PriorityQueue
 
-    always_commit_skeleton: bool
     """Whether to always commit the skeleton of the program."""
 
     enable_state_hash: bool
@@ -294,13 +294,39 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         self._results_best_cost = None
 
         root_data = PriorityTreeNodeData.make_empty(self.state, program, minimize)
-        _init_scope_from(root_data.result.scopes[0], -1, {})
+        _init_scope_from(root_data.result.scopes[0], -1, {}, overwrite_commit=True)
+
         self._root = self._push_node(None, root_data, None)
 
         try:
             while not self._queue.empty():
                 node, result = self._pop_node()
                 self._search_stat['nr_expanded_nodes'] += 1
+
+                if result is not None:
+                    self._expand_result(node, result)
+                else:
+                    self._expand_node(node)
+        except _SolutionFound:
+            pass
+
+        if self._results is not None:
+            return [x.controller_actions for x in self._results]
+
+    def main_continue(self, root_node: PriorityTreeNode, current_node: PriorityTreeNode, current_result: CrowPlanningResult3) -> List[Tuple[CrowControllerApplier, ...]]:
+        self._queue = PriorityQueue()
+        self._visited_node_data.clear()
+        self._results = None
+        self._results_best_cost = None
+
+        self._root = root_node
+        self._push_node_result(current_node, current_result)
+
+        try:
+            while not self._queue.empty():
+                node, result = self._pop_node()
+                self._search_stat['nr_expanded_nodes'] += 1
+
                 if result is not None:
                     self._expand_result(node, result)
                 else:
@@ -414,6 +440,8 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
             print(f'  Result: A={child_result.controller_actions}')
 
         if child_node is self._root:
+            child_result.planner_root_node = self._root
+            child_result.planner_current_node = child_node
             self.set_results([child_result])
 
         # result || stmt -> parent_node.program
@@ -430,14 +458,15 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         elif isinstance(stmt, MRProgram):
             self._push_node(parent_node, PriorityTreeNodeData(child_result, tuple(), stmt.middle, stmt.right, parent_node.data.minimize), None)
         elif isinstance(stmt, CrowBehaviorCommit):
-            if stmt.behavior:
-                new_scopes = child_result.scopes.copy()
-                new_scopes[scope_id]['__commit_execution__'] = TensorValue.from_scalar(True)
-                new_result = child_result.clone(scopes=new_scopes)
-                self._maybe_commit_result(new_result, scope_id)
-                self._push_node_result(parent_node, new_result)
-            else:
-                self._push_node_result(parent_node, child_result)
+            for child_result in self._handle_commit_statement(child_result, stmt, scope_id):
+                if stmt.execution:
+                    new_scopes = child_result.scopes.copy()
+                    new_scopes[scope_id]['__commit_execution__'] = TensorValue.from_scalar(True)
+                    new_result = child_result.clone(scopes=new_scopes)
+                    self._maybe_commit_result(new_result, scope_id, parent_node)
+                    self._push_node_result(parent_node, new_result)
+                else:
+                    self._push_node_result(parent_node, child_result)
         elif isinstance(stmt, CrowAchieveExpression):
             self._handle_result_achieve_statement(parent_node, child_result, stmt, scope_id)
         elif isinstance(stmt, CrowBehaviorApplicationExpression):
@@ -450,7 +479,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
             raise NotImplementedError()
         elif isinstance(stmt, CrowBehaviorConditionSuite):
             self._handle_result_condition_statement(parent_node, child_result, stmt, scope_id)
-        elif isinstance(stmt, (CrowBindExpression, CrowAssertExpression, CrowUntrackExpression, CrowRuntimeAssignmentExpression, CrowControllerApplicationExpression)):
+        elif isinstance(stmt, (CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression, CrowUntrackExpression, CrowRuntimeAssignmentExpression, CrowControllerApplicationExpression)):
             for applied_result in self._handle_primitive_statement(child_result, stmt, scope_id):
                 self._push_node_result(parent_node, self._maybe_annotate_dependency(child_result, applied_result, stmt, scope_id))
         elif isinstance(stmt, CrowBehaviorEffectApplicationExpression):
@@ -459,21 +488,30 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         else:
             raise ValueError(f'Invalid statement type for dfs_inner: {stmt}.')
 
-    def _maybe_commit_result(self, result: CrowPlanningResult3, scope_id: int) -> None:
+    def _handle_commit_statement(self, result: CrowPlanningResult3, stmt: CrowBehaviorCommit, scope_id: int) -> List[CrowPlanningResult3]:
+        if stmt.csp:
+            yield from self._solve_csp(result)
+        else:
+            yield result
+
+    def _maybe_commit_result(self, result: CrowPlanningResult3, scope_id: int, parent_node: PriorityTreeNode) -> None:
         if len(result.controller_actions) == 0:
             return
 
-        all_passed = False
+        all_passed = True
         while True:
             if scope_id < 0:
                 break
 
             if not result.scopes[scope_id]['__commit_execution__'].item():
-                all_passed = True
+                all_passed = False
                 break
+
             scope_id = result.scopes[scope_id]['__parent__'].item()
 
         if all_passed:
+            result.planner_root_node = self._root
+            result.planner_current_node = parent_node
             self.set_results([result])
 
     def _expand_node(self, node: PriorityTreeNode):
@@ -541,7 +579,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
 
         if middle_program is None and isinstance(stmt, CrowAchieveExpression):
             # Evaluate the goal directly.
-            rv, new_csp = self.evaluate(stmt.goal, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id], clone_csp=True)
+            rv, new_csp = self.evaluate(stmt.goal, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id], clone_csp=True, state_index=result.get_state_index())
 
             if isinstance(rv, OptimisticValue):
                 new_result = result.clone(
@@ -613,6 +651,8 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         )
 
         L_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in L_prime) if L_prime is not None else tuple()
+        if behavior_match.behavior.always:
+            L_prime = (ScopedCrowExpression(CrowBehaviorCommit.execution_only(), new_scope_id), ) + L_prime
         M_prime = CrowBehaviorOrderingSuite.make_sequential(M_prime, variable_scope_identifier=new_scope_id) if M_prime is not None else None
         R_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in R_prime)
 
@@ -654,6 +694,8 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         )
 
         L_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in L_prime) if L_prime is not None else tuple()
+        if behavior_match.behavior.always:
+            L_prime = (ScopedCrowExpression(CrowBehaviorCommit.execution_only(), new_scope_id), ) + L_prime
         if M_prime is not None:
             if middle_program is not None:
                 M_prime = CrowBehaviorOrderingSuite.make_unordered(middle_program, CrowBehaviorOrderingSuite.make_sequential(M_prime, variable_scope_identifier=new_scope_id))
@@ -679,7 +721,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         new_csp = child_result.csp
 
         if stmt.is_foreach_in_expression:
-            objects, new_csp = self.evaluate(stmt.loop_in_expression, state=child_result.state, csp=child_result.csp, bounded_variables=child_result.scopes[scope_id], clone_csp=True)
+            objects, new_csp = self.evaluate(stmt.loop_in_expression, state=child_result.state, csp=child_result.csp, bounded_variables=child_result.scopes[scope_id], clone_csp=True, state_index=child_result.get_state_index())
             if isinstance(objects, ListValue):
                 objects = objects.values
             elif isinstance(objects, TensorValue) and objects.dtype.is_batched_list_type:
@@ -736,7 +778,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         self, parent_node: PriorityTreeNode, child_result: CrowPlanningResult3,
         stmt: CrowBehaviorConditionSuite, scope_id: int
     ) -> None:
-        rv, new_csp = self.evaluate(stmt.condition, state=child_result.state, csp=child_result.csp, bounded_variables=child_result.scopes[scope_id])
+        rv, new_csp = self.evaluate(stmt.condition, state=child_result.state, csp=child_result.csp, bounded_variables=child_result.scopes[scope_id], clone_csp=True, state_index=child_result.get_state_index())
         if self.verbose:
             print('    Condition suite:', stmt.condition, '=>', rv)
 
@@ -794,12 +836,17 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
                 for var in stmt.variables:
                     new_scopes[scope_id][var.name] = TensorValue.from_optimistic_value(new_csp.new_var(var.dtype, wrap=True))
                 if not stmt.goal.is_null_expression:
-                    rv, new_csp = self.evaluate(stmt.goal, state=result.state, csp=new_csp, bounded_variables=new_scopes[scope_id], force_tensor_value=True, clone_csp=False)
+                    rv, new_csp = self.evaluate(stmt.goal, state=result.state, csp=new_csp, bounded_variables=new_scopes[scope_id], force_tensor_value=True, clone_csp=False, state_index=result.get_state_index())
                     yield result.clone(csp=new_csp.add_equal_constraint(rv, True), scopes=new_scopes)
                 else:
                     yield result.clone(csp=new_csp, scopes=new_scopes)
+        elif isinstance(stmt, CrowMemQueryExpression):
+            new_scopes = result.scopes.copy()
+            new_state, new_csp, new_scope = self.mem_query(stmt.query, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id], state_index=result.get_state_index())
+            new_scopes[scope_id] = new_scope
+            yield result.clone(state=new_state, csp=new_csp, scopes=new_scopes)
         elif isinstance(stmt, CrowAssertExpression):
-            rv, new_csp = self.evaluate(stmt.bool_expr, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id])
+            rv, new_csp = self.evaluate(stmt.bool_expr, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id], clone_csp=True, state_index=result.get_state_index())
             if self.verbose:
                 print('    Processing assert stmt:', stmt.bool_expr, '=>', rv)
             if isinstance(rv, OptimisticValue):
@@ -811,7 +858,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         elif isinstance(stmt, CrowUntrackExpression):
             yield result.clone_with_removed_constraint(scope_id, stmt.goal)
         elif isinstance(stmt, CrowRuntimeAssignmentExpression):
-            rv, new_csp = self.evaluate(stmt.value, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id], force_tensor_value=True)
+            rv, new_csp = self.evaluate(stmt.value, state=result.state, csp=result.csp, bounded_variables=result.scopes[scope_id], force_tensor_value=True, clone_csp=True, state_index=result.get_state_index())
             if self.verbose:
                 print('    Processing runtime assignment stmt:', stmt.variable, '<-', stmt.value, '. Value:', rv)
             new_scopes = result.scopes.copy()
@@ -820,11 +867,18 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
             yield result.clone(csp=new_csp, scopes=new_scopes)
         elif isinstance(stmt, CrowControllerApplicationExpression):
             new_csp = result.csp.clone()
-            argument_values = [self.evaluate(x, state=result.state, csp=new_csp, bounded_variables=result.scopes[scope_id], clone_csp=False, force_tensor_value=True)[0] for x in stmt.arguments]
+            argument_values = [self.evaluate(x, state=result.state, csp=new_csp, bounded_variables=result.scopes[scope_id], clone_csp=False, force_tensor_value=True, state_index=result.get_state_index())[0] for x in stmt.arguments]
             if self.verbose:
                 print('    Processing controller application stmt:', CrowControllerApplier(stmt.controller, argument_values))
             new_csp.increment_state_timestamp()
-            result = result.clone(csp=new_csp, controller_actions=result.controller_actions + (CrowControllerApplier(stmt.controller, argument_values),))
+            controller_applier = CrowControllerApplier(stmt.controller, argument_values)
+            controller_applier.set_constraints(
+                result.scope_constraints,
+                result.scopes,
+                scope_id
+            )
+            result = result.clone(csp=new_csp, controller_actions=result.controller_actions + (controller_applier, ))
+
             if stmt.controller.effect_body is not None:
                 yield from self._handle_behavior_effect_application(result, stmt, None, argument_values)
             else:
@@ -848,11 +902,11 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         new_csp = result.csp.clone()
 
         if isinstance(effect, CrowBehaviorEffectApplicationExpression):
-            new_data = execute_behavior_effect_body(self.executor, effect.behavior, state=result.state, csp=new_csp, scope=result.scopes[scope_id], action_index=len(result.controller_actions) - 1)
+            new_data = execute_behavior_effect_body(self.executor, effect.behavior, state=result.state, csp=new_csp, scope=result.scopes[scope_id], state_index=result.get_state_index())
             effect_applier = CrowEffectApplier(effect.behavior.effect_body.statements, result.scopes[scope_id])
         elif isinstance(effect, CrowControllerApplicationExpression):
             scope = {x.name: y for x, y in zip(effect.controller.arguments, argument_values)}
-            new_data = execute_behavior_effect_body(self.executor, effect.controller, state=result.state, csp=new_csp, scope=scope, action_index=len(result.controller_actions) - 1)
+            new_data = execute_behavior_effect_body(self.executor, effect.controller, state=result.state, csp=new_csp, scope=scope, state_index=result.get_state_index())
             effect_applier = CrowEffectApplier(effect.controller.effect_body.statements, scope)
         else:
             raise ValueError(f'Invalid effect type: {effect}.')
@@ -877,7 +931,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
                 print('    Constraints for scope', c_scope_id, ':')
             new_scope_constraint_evaluations[c_scope_id] = list()
             for constraint in constraints:
-                c_rv, _ = self.evaluate(constraint, state=new_data, csp=new_csp, bounded_variables=new_scopes[c_scope_id], clone_csp=False)
+                c_rv, _ = self.evaluate(constraint, state=new_data, csp=new_csp, bounded_variables=new_scopes[c_scope_id], clone_csp=False, state_index=result.get_state_index())
                 if self.verbose:
                     if bool(c_rv) is False:
                         print(jacinle.colored('  Constraint:', 'red'), replace_variable_with_value(constraint, new_scopes[c_scope_id]), '=>', c_rv)
@@ -899,6 +953,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         new_controller_actions = result.controller_actions
         if self.include_effect_appliers:
             new_controller_actions += (effect_applier,)
+            new_csp.increment_state_timestamp()
         yield result.clone(
             state=new_data, csp=new_csp, controller_actions=new_controller_actions,
             scopes=new_scopes, scope_constraints=new_scope_constraints, scope_constraint_evaluations=new_scope_constraint_evaluations
@@ -935,17 +990,37 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
             solution = dpll_solve(
                 self.executor, result.csp, simulation_interface=self.simulation_interface, generator_manager=self.generator_manager,
                 actions=result.controller_actions, verbose=self.verbose,
-                max_generator_trials=self.max_csp_branching_factor
+                max_generator_trials=self.max_csp_branching_factor,
+                simulation_state=result.state.simulation_state, simulation_state_index=result.state.simulation_state_index
             )
             if solution is not None:
                 break
 
         if solution is not None:
-            actions = csp_ground_action_list(self.executor, result.controller_actions, solution)
+            new_state = csp_ground_state(self.executor, result.state, solution)
+            new_actions = csp_ground_action_list(self.executor, result.controller_actions, solution)
+
+            if self.simulation_interface is not None:
+                with self.simulation_interface.restore_context():
+                    for grounded_action in new_actions:
+                        succ = self.simulation_interface.step_without_error(grounded_action)
+                        if not succ:
+                            if self.verbose:
+                                jacinle.log_function.print(jacinle.colored(f'Action {grounded_action} failed.', 'red'))
+                            raise ValueError(f'Action {grounded_action} failed.')
+                    new_state.set_simulation_state(
+                        state=self.simulation_interface.save_state(),
+                        state_index=len(new_actions)
+                    )
+
             # We have cleared the CSP.
             # TODO(Jiayuan Mao @ 2024/06/8): We also need to update the scope variables --- they can now be directly assigned. The same applies to the state.
             # For now this is okay, because we are only solving the CSP problem at the very end.
-            yield result.clone(csp=ConstraintSatisfactionProblem(state_timestamp=len(actions)), controller_actions=actions)
+
+            yield result.clone(
+                csp=ConstraintSatisfactionProblem(state_timestamp=len(new_actions)),
+                state=new_state, controller_actions=new_actions
+            )
 
 
 def _resolve_bounded_variables(bounded_variables: Dict[str, Any], scope: Dict[str, Any]) -> Dict[str, Any]:
@@ -958,8 +1033,11 @@ def _resolve_bounded_variables(bounded_variables: Dict[str, Any], scope: Dict[st
     return bounded_variables
 
 
-def _init_scope_from(scope: Dict[str, Any], parent_scope_id: int, parent_scope: Dict[str, Any], copy_commit: bool = False) -> Dict[str, Any]:
+def _init_scope_from(scope: Dict[str, Any], parent_scope_id: int, parent_scope: Dict[str, Any], copy_commit: bool = False, overwrite_commit: Optional[bool] = None) -> Dict[str, Any]:
     scope['__parent__'] = TensorValue.from_scalar(parent_scope_id)
-    scope['__commit_execution__'] = TensorValue.from_scalar(parent_scope['__commit_execution__'] if copy_commit else False)
+    if overwrite_commit is not None:
+        scope['__commit_execution__'] = TensorValue.from_scalar(overwrite_commit)
+    else:
+        scope['__commit_execution__'] = TensorValue.from_scalar(parent_scope['__commit_execution__'] if copy_commit else False)
     return scope
 

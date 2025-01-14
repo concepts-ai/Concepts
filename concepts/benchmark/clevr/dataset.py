@@ -29,7 +29,7 @@ from concepts.benchmark.clevr.clevr_constants import g_attribute_concepts, g_rel
 
 logger = get_logger(__file__)
 
-__all__ = ['CLEVRDatasetUnwrapped', 'CLEVRDatasetFilterableView', 'make_dataset', 'CLEVRCustomTransferDataset', 'make_custom_transfer_dataset', 'annotate_scene', 'canonize_answer', 'annotate_objects']
+__all__ = ['CLEVRDatasetUnwrapped', 'CLEVRDatasetFilterableView', 'make_dataset', 'CLEVRCustomTransferDataset', 'make_custom_transfer_dataset', 'annotate_scene', 'canonicalize_answer', 'annotate_objects']
 
 
 class CLEVRDatasetUnwrapped(FilterableDatasetUnwrapped):
@@ -161,7 +161,7 @@ class CLEVRDatasetUnwrapped(FilterableDatasetUnwrapped):
         feed_dict.question_raw_tokenized = metainfo.question_tokenized
         feed_dict.question = metainfo.question_tokenized
         feed_dict.question_type = metainfo.question_type
-        feed_dict.answer = canonize_answer(metainfo.answer, None)
+        feed_dict.answer = canonicalize_answer(metainfo.answer, None)
 
         if self.question_transform is not None:
             self.question_transform(feed_dict)
@@ -557,19 +557,19 @@ def annotate_scene(scene: dict) -> dict:
     return feed_dict
 
 
-def canonize_answer(answer: str, question_type: Optional[str] = None) -> Union[bool, int, str]:
-    """Canonize the answer to a standard format.
+def canonicalize_answer(answer: str, question_type: Optional[str] = None) -> Union[bool, int, str]:
+    """canonicalize the answer to a standard format.
 
     - For yes/no questions, the answer will be converted to a boolean.
     - For count questions, the answer will be converted to an integer.
     - For other questions, the answer will be kept as it is.
 
     Args:
-        answer: the answer to be canonized.
+        answer: the answer to be canonicalized.
         question_type: the question type. If None, the question type will be inferred from the answer.
 
     Returns:
-        the canonized answer.
+        the canonicalized answer.
     """
     if answer in ('yes', 'no'):
         answer = (answer == 'yes')

@@ -352,6 +352,7 @@ def quat_mul(q0, q1, *args):
 
 def quat_pow(q, n):
     q = np.asarray(q, dtype=np.float64)
+    assert len(q.shape) == 1
     assert q.shape[-1] == 4
 
     theta = 0
@@ -360,6 +361,9 @@ def quat_pow(q, n):
     if sin_theta > 0.0001:
         theta = 2 * np.arcsin(sin_theta)
         theta *= 1 if q[..., 3] >= 0 else -1
+
+    if abs(sin_theta) < 0.0001:
+        return np.zeros_like(q) + [0, 0, 0, 1]
 
     theta *= n
     axis = q[..., :3] / sin_theta

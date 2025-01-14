@@ -206,12 +206,12 @@ def cvt_opt_value(value: Union[OptimisticValue, TensorValue, StateObjectReferenc
 @dataclass
 class SimulationFluentConstraintFunction(object):
     """SimulationConstraint is a special kind of constraint that asserts the return value of the function is the grounding
-    of a predicate after executing action ``action_index`` in the simulation. This is a special kind of constraint that
+    of a predicate after executing action ``state_index`` in the simulation. This is a special kind of constraint that
     has to be evaluated in a simulation environment. Therefore it is listed separately from the other domain-general constraints.
     """
 
-    action_index: int
-    """The index of the action that is executed in the simulation."""
+    state_index: int
+    """The index of the state in simulation."""
 
     predicate: Function
     """The predicate to be grounded."""
@@ -225,8 +225,8 @@ class SimulationFluentConstraintFunction(object):
     @property
     def name(self) -> str:
         if self.is_execution_constraint:
-            return f'ExecutionConstraint({self.action_index}, {self.predicate}, {self.arguments})'
-        return f'SimulationConstraint({self.action_index}, {self.predicate}, {self.arguments})'
+            return f'ExecutionFluentConstraint(t={self.state_index}, {self.predicate.name}, args={self.arguments})'
+        return f'SimulationFluentConstraint(t={self.state_index}, {self.predicate.name}, args={self.arguments})'
 
 
 class Constraint(object):
@@ -328,7 +328,7 @@ class Constraint(object):
         self.group = group
 
     @classmethod
-    def from_function(cls, function: Function, args: Sequence[Union[bool, int, torch.Tensor, TensorValue, Any]], rv: Union[bool, int, torch.Tensor, TensorValue, Any]) -> 'Constraint':
+    def from_function(cls, function: Union[Function], args: Sequence[Union[bool, int, torch.Tensor, TensorValue, Any]], rv: Union[bool, int, torch.Tensor, TensorValue, Any]) -> 'Constraint':
         """Create a constraint given a function, arguments, and return value.
 
         Args:
@@ -498,8 +498,14 @@ class ConstraintSatisfactionProblem(object):
     def empty(self):
         return len(self.constraints) == 0
 
+    def get_state_timestamp(self):
+        return self._state_timestamp
+
     def increment_state_timestamp(self):
         self._state_timestamp += 1
+
+    def set_state_timestamp(self, timestamp: int):
+        self._state_timestamp = timestamp
 
     def clone(self, constraints: Optional[List[Constraint]] = None) -> 'ConstraintSatisfactionProblem':
         """Clone the constraint satisfaction problem.

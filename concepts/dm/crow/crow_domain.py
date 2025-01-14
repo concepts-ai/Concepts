@@ -8,7 +8,7 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
-from typing import Any, Optional, Union, Sequence, List, Dict, TYPE_CHECKING
+from typing import Any, Optional, Union, Sequence, List, Mapping, Dict, TYPE_CHECKING
 
 import torch
 from jacinle.logging import get_logger
@@ -19,9 +19,10 @@ from concepts.dsl.dsl_types import VectorValueType, ScalarValueType, NamedTensor
 from concepts.dsl.dsl_types import BOOL, INT64, FLOAT32, STRING
 from concepts.dsl.dsl_functions import Function, FunctionType, FunctionArgumentListType, FunctionReturnType
 from concepts.dsl.dsl_domain import DSLDomainBase
+from concepts.dsl.constraint import OPTIM_MAGIC_NUMBER_MAGIC
 from concepts.dsl.expression import Expression, ValueOutputExpression, NullExpression
 from concepts.dsl.tensor_value import TensorValue
-from concepts.dsl.tensor_state import NamedObjectTensorState
+from concepts.dsl.tensor_state import NamedObjectTensorState, ObjectNameArgument, ObjectTypeArgument
 
 from concepts.dm.crow.controller import CrowController
 from concepts.dm.crow.crow_function import CrowFeature, CrowFunction
@@ -267,7 +268,7 @@ class CrowDomain(DSLDomainBase):
         """
         return name in self.features
 
-    def get_feature(self, name: str) -> CrowFeature:
+    def get_feature(self, name: str, allow_function: bool = False) -> CrowFeature:
         """Get a feature by name.
 
         Args:
@@ -277,6 +278,10 @@ class CrowDomain(DSLDomainBase):
             the feature with the given name.
         """
         if name not in self.features:
+            if allow_function:
+                if name in self.functions:
+                    return self.functions[name]
+
             raise ValueError(f'Unknown feature: {name}.')
         return self.features[name]
 
@@ -342,7 +347,7 @@ class CrowDomain(DSLDomainBase):
             raise ValueError(f'Unknown function: {name}.')
         return self.functions[name]
 
-    def define_controller(self, name: str, arguments: Sequence[Variable], effect_body: Optional[CrowBehaviorOrderingSuite] = None) -> CrowController:
+    def define_controller(self, name: str, arguments: Sequence[Variable], effect_body: Optional[CrowBehaviorOrderingSuite] = None, python_effect: bool = False) -> CrowController:
         """Define a new controller.
 
         Args:
@@ -355,7 +360,7 @@ class CrowDomain(DSLDomainBase):
         """
         if name in self.controllers:
             raise ValueError(f'Controller {name} already exists.')
-        controller = CrowController(name, arguments, effect_body=effect_body)
+        controller = CrowController(name, arguments, effect_body=effect_body, python_effect=python_effect)
         self.controllers[name] = controller
         return controller
 
@@ -390,7 +395,8 @@ class CrowDomain(DSLDomainBase):
         effect_body: CrowBehaviorOrderingSuite,
         heuristic: Optional[CrowBehaviorOrderingSuite] = None,
         minimize: Optional[ValueOutputExpression] = None,
-        always: bool = False
+        always: bool = False,
+        python_effect: bool = False
     ):
         """Define a new behavior.
 
@@ -403,6 +409,7 @@ class CrowDomain(DSLDomainBase):
             heuristic: the heuristic of the new behavior.
             minimize: the minimize condition of the new behavior.
             always: whether the new behavior is always "feasible".
+            python_effect: whether the effect is implemented as a Python function.
 
         Returns:
             the newly defined behavior.
@@ -414,7 +421,8 @@ class CrowDomain(DSLDomainBase):
             effect_body=effect_body,
             heuristic=heuristic,
             minimize=minimize,
-            always=always
+            always=always,
+            python_effect=python_effect
         )
         return behavior
 
@@ -535,6 +543,22 @@ class CrowDomain(DSLDomainBase):
         from concepts.dm.crow.parsers.cdl_parser import load_domain_string_incremental
         return load_domain_string_incremental(self, string)
 
+    def set_goal_program(self, string: str):
+        if '__goal__' in self.behaviors:
+            del self.behaviors['__goal__']
+
+        assert '__goal__' in string, 'Goal program should contain a behavior named "__goal__".'
+        self.incremental_define(string)
+
+    def incremental_define_file(self, filename: str):
+        """Incrementally define new parts of the domain from a file.
+
+        Args:
+            filename: the path of the file to be loaded.
+        """
+        from concepts.dm.crow.parsers.cdl_parser import load_domain_file_incremental
+        return load_domain_file_incremental(self, filename)
+
     def print_summary(self, external_functions: bool = False, full_generators: bool = False):
         """Print a summary of the domain."""
         # TODO(Jiayuan Mao @ 2024/03/15): implement this.
@@ -592,6 +616,51 @@ class CrowProblem(object):
 
 
 class CrowState(NamedObjectTensorState):
+    simulation_state: Optional[int] = None
+    simulation_state_index: int = 0
+
+    def set_simulation_state(self, state: Optional[int], state_index: int):
+        self.simulation_state = state
+        self.simulation_state_index = state_index
+
+    def init_dirty_feature(self, function: Function):
+        """Initialize a dirty feature. A dirty feature is a cacheable feature but not in the original state representation.
+        The convention for dirty features is that they are initialized with optimistic values being OPTIM_MAGIC_NUMBER_MAGIC.
+
+        Args:
+            function: the feature to initialize.
+        """
+        feature_name = function.name
+        return_type = function.return_type
+
+        if feature_name not in self.features:
+            sizes = list()
+            for arg_def in function.arguments:
+                sizes.append(len(self.object_type2name[arg_def.typename]) if arg_def.typename in self.object_type2name else 0)
+            sizes = tuple(sizes)
+            self.features[feature_name] = tensor = TensorValue.make_empty(return_type, [var.name for var in function.arguments], sizes)
+            tensor.init_tensor_optimistic_values()
+            tensor.tensor_optimistic_values.fill_(OPTIM_MAGIC_NUMBER_MAGIC)
+            self.internals.setdefault('dirty_features', set()).add(feature_name)
+
+    def batch_set_value(self, feature_name: str, value: Union[torch.Tensor, tuple, list]) -> None:
+        if feature_name not in self.features:
+            raise ValueError(f'Unknown feature: {feature_name}.')
+        if not isinstance(value, torch.Tensor):
+            value = torch.tensor(value, dtype=self.features[feature_name].tensor.dtype)
+        self.features[feature_name].tensor = value
+
+    def fast_set_value(self, feature_name: str, indices: Sequence[str], value: Any):
+        if feature_name not in self.features:
+            raise ValueError(f'Unknown feature: {feature_name}.')
+        indices = tuple(self.get_typed_index(arg) for arg in indices)
+        self.features[feature_name].fast_set_index(indices, value)
+
+    def clone(self) -> 'CrowState':
+        rv: CrowState = super().clone()
+        rv.set_simulation_state(self.simulation_state, self.simulation_state_index)
+        return rv
+
     @classmethod
     def make_empty_state(cls, domain: CrowDomain, objects: Dict[str, str]):
         object_names = list(objects.keys())
@@ -616,15 +685,39 @@ class CrowState(NamedObjectTensorState):
 
         return state
 
-    def batch_set_value(self, feature_name: str, value: Union[torch.Tensor, tuple, list]) -> None:
-        if feature_name not in self.features:
-            raise ValueError(f'Unknown feature: {feature_name}.')
-        if not isinstance(value, torch.Tensor):
-            value = torch.tensor(value, dtype=self.features[feature_name].tensor.dtype)
-        self.features[feature_name].tensor = value
+    def clone_with_new_objects(self, domain: CrowDomain, object_names: ObjectNameArgument, object_types: ObjectTypeArgument = None):
+        """Append objects to the state."""
 
-    def fast_set_value(self, feature_name: str, indices: Sequence[str], value: Any):
-        if feature_name not in self.features:
-            raise ValueError(f'Unknown feature: {feature_name}.')
-        indices = tuple(self.get_typed_index(arg) for arg in indices)
-        self.features[feature_name].fast_set_index(indices, value)
+        if isinstance(object_names, Mapping):
+            object_names = list(object_names.keys())
+            object_types = list(object_names.values())
+        else:
+            assert object_types is not None, 'object_types should not be None if object_names is not a mapping.'
+            object_names = list(object_names)
+            object_types = list(object_types)
+
+        type2names = {t.typename: [] for t in object_types}
+        for name, type_ in zip(object_names, object_types):
+            type2names[type_.typename].append(name)
+
+        new_features = dict()
+        for name, feat in self.features.items():
+            feat_def = domain.get_feature(name)
+            current_shape = list(feat.variable_shape)
+            assert len(current_shape) == len(feat_def.arguments), f'Feature {name} has wrong number of arguments: def={len(feat_def.arguments)} vs actual={len(current_shape)}.'
+            found = False
+            for i, arg in enumerate(feat_def.arguments):
+                if arg.typename in type2names:
+                    current_shape[i] += len(type2names[arg.typename])
+                    found = True
+
+            if not found:
+                new_features[name] = feat.clone()
+            else:
+                new_features[name] = feat.pad(tuple(current_shape))
+
+        rv = type(self)(features=new_features, object_types=self.object_types + tuple(object_types), object_names=self.object_names + tuple(object_names), batch_dims=self._batch_dims, internals=self.clone_internals())
+        rv.set_simulation_state(self.simulation_state, self.simulation_state_index)
+        return rv
+
+

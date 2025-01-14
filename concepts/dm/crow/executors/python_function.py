@@ -170,12 +170,11 @@ class CrowPythonFunctionRef(object):
         if self.support_batch:
             if self.auto_broadcast and auto_broadcast:
                 argument_values = expand_argument_values(argument_values)
+        else:
+            # If the function does not support batch, we will have to automatically batch the processing.
+            argument_values = expand_argument_values(argument_values)
 
         argument_values_flat = list(argument_values)
-        if self.unwrap_values:
-            argument_values_flat = [v.tensor if isinstance(v, TensorValue) else v for v in argument_values_flat]
-            if not self.support_batch:
-                argument_values_flat = [v.item() if isinstance(v, TensorizedPyObjValues) else v for v in argument_values_flat]
 
         if additional_parameters is not None:
             additional_parameters = list(additional_parameters)
@@ -198,8 +197,16 @@ class CrowPythonFunctionRef(object):
                     raise RuntimeError('For functions with QINDEX, the function_def argument must be provided.')
                 rv = self.forward_internal_autobatch(function_def, function, argument_values_flat)
             else:
+                if self.unwrap_values:
+                    argument_values_flat = [v.tensor if isinstance(v, TensorValue) else v for v in argument_values_flat]
+                    if not self.support_batch:
+                        argument_values_flat = [v.item() if isinstance(v, TensorizedPyObjValues) else v for v in argument_values_flat]
                 rv = function(*argument_values_flat)
         else:
+            if self.unwrap_values:
+                argument_values_flat = [v.tensor if isinstance(v, TensorValue) else v for v in argument_values_flat]
+                if not self.support_batch:
+                    argument_values_flat = [v.item() if isinstance(v, TensorizedPyObjValues) else v for v in argument_values_flat]
             rv = function(*argument_values_flat)
 
         if not wrap_rv:
@@ -237,6 +244,37 @@ class CrowPythonFunctionRef(object):
             output[i] = rv
         output = TensorValue.from_tensor(output.reshape(output_dims), rtype, batch_variables=batch_variables)
         return output
+
+    def forward_internal_autobatch2(self, function_def, function, argument_values_flat):
+        options_per_argument = list()
+        output_dims = list()
+        batch_variables = list()
+        other_batch_variables = None
+        for i, arg in enumerate(argument_values_flat):
+            if arg is QINDEX:
+                objects = self._executor.state.object_type2name[function_def.ftype.argument_types[i].typename]
+                if self.use_object_names:
+                    options_per_argument.append(objects)
+                else:
+                    options_per_argument.append(list(range(len(objects))))
+                output_dims.append(len(objects))
+                batch_variables.append(function_def.ftype.argument_names[i])
+            else:
+                options_per_argument.append([arg])
+                if isinstance(arg, TensorValue):
+                    if other_batch_variables is None:
+                        other_batch_variables = arg.batch_variables
+                    else:
+                        assert tuple(other_batch_variables) == tuple(arg.batch_variables), 'Inconsistent batch variables.'
+
+        rtype = function_def.ftype.return_type
+        if not isinstance(rtype, (TensorValueTypeBase, PyObjValueType)):
+            raise TypeError('Only TensorValueTypeBase and PyObjValueType are supported for auto-batch functions with QINDEX.')
+
+        options = list(itertools.product(*options_per_argument))
+        for i, option in enumerate(options):
+            option = list(option)
+            pass
 
     def forward_generator(
         self, argument_values: Sequence[TensorValueExecutorReturnType], return_type: Optional[Union[TensorValueTypeBase, PyObjValueType]] = None,

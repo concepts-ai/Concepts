@@ -23,7 +23,7 @@ which handles the case where the value of a variable can be unknown and "optimis
 
 import itertools
 import contextlib
-from typing import Any, Optional, Union, Iterator, Sequence, Tuple, List, Mapping, Dict, Callable
+from typing import Any, Optional, Union, Iterator, Sequence, Tuple, List, Mapping, Dict, Callable, TYPE_CHECKING
 
 import torch
 import jactorch
@@ -37,13 +37,19 @@ from concepts.dsl.value import ListValue
 from concepts.dsl.tensor_value import TensorizedPyObjValues, TensorValue, MaskedTensorStorage
 from concepts.dsl.tensor_state import StateObjectReference, StateObjectList, TensorState, NamedObjectTensorState
 from concepts.dsl.tensor_value_utils import expand_argument_values
-from concepts.dsl.constraint import OPTIM_MAGIC_NUMBER_MAGIC, is_optimistic_value, OptimisticValue, cvt_opt_value, Constraint, EqualityConstraint, ConstraintSatisfactionProblem, SimulationFluentConstraintFunction
+from concepts.dsl.constraint import (
+    OPTIM_MAGIC_NUMBER_MAGIC, is_optimistic_value, OptimisticValue, cvt_opt_value,
+    Constraint, EqualityConstraint, ConstraintSatisfactionProblem, SimulationFluentConstraintFunction
+)
 from concepts.dsl.parsers.parser_base import ParserBase
 from concepts.dsl.executors.tensor_value_executor import BoundedVariablesDictCompatible, TensorValueExecutorBase, TensorValueExecutorReturnType
 
 from concepts.dm.crow.crow_function import CrowFeature, CrowFunction, CrowFunctionEvaluationMode
 from concepts.dm.crow.crow_domain import CrowDomain, CrowState
 from concepts.dm.crow.executors.python_function import CrowPythonFunctionRef, CrowPythonFunctionCrossRef, CrowSGC
+
+if TYPE_CHECKING:
+    from concepts.dm.crow.interfaces.controller_interface import CrowSimulationControllerInterface
 
 
 logger = get_logger(__file__)
@@ -72,9 +78,18 @@ class CrowExecutor(TensorValueExecutorBase):
         self._register_default_function_implementations()
         if load_external_function_implementations:
             self._register_external_function_implementations_from_domain()
+
+        self._simulation_interface = None
         self._effect_update_from_simulation = False
         self._effect_update_from_execution = False
-        self._effect_action_index = None
+        self._effect_state_index = None
+
+    @property
+    def simulation_interface(self) -> Optional['CrowSimulationControllerInterface']:
+        return self._simulation_interface
+
+    def set_simulation_interface(self, simulation_interface: 'CrowSimulationControllerInterface'):
+        self._simulation_interface = simulation_interface
 
     @property
     def csp(self) -> Optional[ConstraintSatisfactionProblem]:
@@ -184,8 +199,8 @@ class CrowExecutor(TensorValueExecutorBase):
         return self._effect_update_from_execution
 
     @property
-    def effect_action_index(self) -> Optional[int]:
-        return self._effect_action_index
+    def effect_state_index(self) -> Optional[int]:
+        return self._effect_state_index
 
     def parse(self, string: Union[str, Expression], *, state: Optional[CrowState] = None, variables: Optional[Sequence[Variable]] = None) -> Expression:
         if isinstance(string, Expression):
@@ -266,17 +281,17 @@ class CrowExecutor(TensorValueExecutorBase):
         return self._default_visitor.visit(expression)
 
     @contextlib.contextmanager
-    def update_effect_mode(self, evaluation_mode: CrowFunctionEvaluationMode, action_index: Optional[int] = None):
+    def update_effect_mode(self, evaluation_mode: CrowFunctionEvaluationMode, state_index: Optional[int] = None):
         old_from_simulation = self._effect_update_from_simulation
         old_from_execution = self._effect_update_from_execution
-        old_action_index = self._effect_action_index
+        old_state_index = self._effect_state_index
         self._effect_update_from_simulation = evaluation_mode is CrowFunctionEvaluationMode.SIMULATION
         self._effect_update_from_execution = evaluation_mode is CrowFunctionEvaluationMode.EXECUTION
-        self._effect_action_index = action_index
+        self._effect_state_index = state_index
         yield
         self._effect_update_from_simulation = old_from_simulation
         self._effect_update_from_execution = old_from_execution
-        self._effect_action_index = old_action_index
+        self._effect_state_index = old_state_index
 
 
 def _fast_index(value, ind):
@@ -414,7 +429,7 @@ class CrowExecutionDefaultVisitor(ExpressionVisitor):
                 BOOL, batched_value.batch_variables,
                 rv, batch_dims=state.batch_dims
             )
-        elif function.is_cacheable and function.name in state.features:
+        elif function.is_cacheable and state is not None and function.name in state.features:  # state maybe None if we are evaluating a "constraint" function.
             argument_values = [v.index if isinstance(v, StateObjectReference) else v for v in argument_values]
 
             batch_variables = list()
@@ -435,13 +450,15 @@ class CrowExecutionDefaultVisitor(ExpressionVisitor):
             value = state.features[function.name][tuple(accessors)]
 
             if 'dirty_features' in state.internals and function.name in state.internals['dirty_features']:
-                if has_list_values:
-                    raise NotImplementedError('List values are not supported for dirty features.')
                 value_opt = state.features[function.name].tensor_optimistic_values[tuple(argument_values)]
                 if (value_opt < 0).any().item():
-                    assert function.is_derived
-                    with self.executor.with_bounded_variables({k: v for k, v in zip(function.arguments, argument_values)}):
-                        return self._rename_derived_function_application(self.visit(function.derived_expression), function.arguments, expr.arguments, argument_values)
+                    if function.is_derived:
+                        # Case 1: derived function.
+                        with self.executor.with_bounded_variables({k: v for k, v in zip(function.arguments, argument_values)}):
+                            return self._rename_derived_function_application(self.visit(function.derived_expression), function.arguments, expr.arguments, argument_values)
+                    else:
+                        # Case 2: external direct function.
+                        return self._rename_derived_function_application(self.forward_external_function(function.name, argument_values, return_type, expression=expr), function.arguments, expr.arguments, argument_values)
 
             if len(index_types) == 0:
                 return value.rename_batch_variables(batch_variables, force=True)
@@ -545,6 +562,9 @@ class CrowExecutionDefaultVisitor(ExpressionVisitor):
             with self.executor.new_bounded_variables({expr.variable: QINDEX}):
                 value = self.forward_args(expr.expression)
             assert isinstance(value, TensorValue)
+
+        if expr.quantification_op is QuantificationOpType.BATCHED:
+            return value
 
         dtype = value.dtype
         batch_variables = value.batch_variables
@@ -702,13 +722,18 @@ class CrowExecutionDefaultVisitor(ExpressionVisitor):
 
         function_name = expr.predicate.function.name
         if function_name not in state.features:
-            raise NotImplementedError('Assignments to dirty features are not supported.')
-        else:
-            if isinstance(target_value, ListValue):
-                if len(target_value.values) == 0:
-                    return
-                target_value = TensorValue(target_value.values[0].dtype, 1 + len(target_value.values[0].batch_variables), torch.stack([x.tensor for x in target_value.values]))
-            state.features[expr.predicate.function.name][tuple(argument_values)] = target_value
+            if function_name not in self.executor.domain.features and function_name not in self.executor.domain.functions:
+                raise ValueError(f'Function {function_name} not found in the state.')
+
+            state.init_dirty_feature(self.executor.domain.functions[function_name])
+
+        if isinstance(target_value, ListValue):
+            if len(target_value.values) == 0:
+                return
+            target_value = TensorValue(target_value.values[0].dtype, 1 + len(target_value.values[0].batch_variables), torch.stack([x.tensor for x in target_value.values]))
+        state.features[function_name][tuple(argument_values)] = target_value
+        if 'dirty_features' in state.internals and function_name in state.internals['dirty_features']:
+            state.features[function_name].tensor_optimistic_values[tuple(argument_values)] = 0
 
     def visit_conditional_select_expression(self, expr: E.ConditionalSelectExpression) -> TensorValueExecutorReturnType:
         value, condition = self.forward_args(expr.predicate, expr.condition)
@@ -789,14 +814,53 @@ class CrowExecutionCSPVisitor(CrowExecutionDefaultVisitor):
         self, function_name: str, argument_values: Sequence[TensorValueExecutorReturnType],
         return_type: Union[TensorValueTypeBase, PyObjValueType], auto_broadcast: bool = True, expression: Optional[E.FunctionApplicationExpression] = None
     ) -> TensorValue:
-        argument_values = expand_argument_values(argument_values)
-        optimistic_masks = [is_optimistic_value(argv.tensor_optimistic_values) for argv in argument_values if isinstance(argv, TensorValue) and argv.tensor_optimistic_values is not None]
-        if len(optimistic_masks) > 0:
-            optimistic_mask = torch.stack(optimistic_masks, dim=-1).any(dim=-1)
+        function = expression.function
 
-            rv = super().forward_external_function(function_name, argument_values, return_type=return_type, auto_broadcast=auto_broadcast, expression=expression)
-            if optimistic_mask.sum().item() == 0:
-                return rv
+        need_reset_simulation_state = False
+        need_simulation_optimistic_execution = False
+        if isinstance(function, CrowFunction) and function.is_simulation_dependent or function.is_execution_dependent:
+            assert self.executor.state is not None
+            assert self.executor.csp is not None
+
+            # print(f'function_name: {function_name}, csp_t={self.executor.csp.get_state_timestamp()}, state_t={self.executor.state.simulation_state_index}')
+            if self.executor.csp.get_state_timestamp() != self.executor.state.simulation_state_index:
+                need_simulation_optimistic_execution = True
+            else:
+                if self.executor.state.simulation_state_index > 0:
+                    need_reset_simulation_state = True
+
+        argument_values = expand_argument_values(argument_values)
+        tensor_values = [argv for argv in argument_values if isinstance(argv, TensorValue)]
+        optimistic_masks = [is_optimistic_value(argv.tensor_optimistic_values) for argv in argument_values if isinstance(argv, TensorValue) and argv.tensor_optimistic_values is not None]
+        if len(optimistic_masks) > 0 or need_simulation_optimistic_execution:
+            if need_simulation_optimistic_execution:
+                if len(optimistic_masks) == 0:
+                    if len(tensor_values) > 0:
+                        optimistic_mask = torch.ones(size=tensor_values[0].tensor.shape[:tensor_values[0].total_batch_dims], dtype=torch.bool, device=tensor_values[0].tensor.device)
+                    elif all(isinstance(argv, StateObjectReference) for argv in argument_values):
+                        optimistic_mask = torch.ones(size=tuple(), dtype=torch.bool, device=None)
+                    else:
+                        raise NotImplementedError('Unsupported case for simulation dependent functions. Either all arguments are StateObjectReference or at least one of the values are TensorValue.')
+                else:
+                    optimistic_mask = optimistic_masks[0].clone()
+                    optimistic_mask[...] = True
+
+                rv = TensorValue(
+                    return_type,
+                    batch_variables=tensor_values[0].batch_variables if len(tensor_values) > 0 else [],
+                    tensor=torch.zeros(optimistic_mask.shape),
+                    batch_dims=tensor_values[0].batch_dims if len(tensor_values) > 0 else 0
+                )
+            else:
+                optimistic_mask = torch.stack(optimistic_masks, dim=-1).any(dim=-1)
+                if need_reset_simulation_state:
+                    with self.executor.simulation_interface.restore_context():
+                        self.executor.simulation_interface.restore_state_keep(self.executor.state.simulation_state, self.executor.state.simulation_state_index)
+                        rv = super().forward_external_function(function_name, argument_values, return_type=return_type, auto_broadcast=auto_broadcast, expression=expression)
+                else:
+                    rv = super().forward_external_function(function_name, argument_values, return_type=return_type, auto_broadcast=auto_broadcast, expression=expression)
+                if optimistic_mask.sum().item() == 0:
+                    return rv
 
             rv.init_tensor_optimistic_values()
             if self.executor.optimistic_execution:
@@ -814,6 +878,7 @@ class CrowExecutionCSPVisitor(CrowExecutionDefaultVisitor):
                     constraint_function = expression.function
                 else:
                     raise NotImplementedError(f'Unsupported expression type: {expression} for optimistic execution.')
+
                 for ind in optimistic_mask.nonzero().tolist():
                     ind = tuple(ind)
                     new_identifier = self.executor.csp.new_var(return_type, wrap=True)
@@ -823,9 +888,15 @@ class CrowExecutionCSPVisitor(CrowExecutionDefaultVisitor):
                         [_fast_index(argv, ind) for argv in argument_values],
                         new_identifier
                     ), note=f'{expr_string}::{ind}' if len(ind) > 0 else expr_string)
+
             return rv
 
-        return super().forward_external_function(function_name, argument_values, return_type=return_type, auto_broadcast=auto_broadcast, expression=expression)
+        if need_reset_simulation_state:
+            with self.executor.simulation_interface.restore_context():
+                self.executor.simulation_interface.restore_state_keep(self.executor.state.simulation_state, self.executor.state.simulation_state_index)
+                return super().forward_external_function(function_name, argument_values, return_type=return_type, auto_broadcast=auto_broadcast, expression=expression)
+        else:
+            return super().forward_external_function(function_name, argument_values, return_type=return_type, auto_broadcast=auto_broadcast, expression=expression)
 
     def visit_function_application_expression(self, expr: E.FunctionApplicationExpression, argument_values: Optional[Tuple[TensorValueExecutorReturnType, ...]] = None) -> TensorValueExecutorReturnType:
         return super().visit_function_application_expression(expr, argument_values)
@@ -986,7 +1057,7 @@ class CrowExecutionCSPVisitor(CrowExecutionDefaultVisitor):
             feature.init_tensor_optimistic_values()
             argument_values = self.forward_args(*expr.predicate.arguments, force_tuple=True)
 
-            assert self.executor.effect_action_index is not None, 'Effect action index must be set if the target predicate will be updated from simulation.'
+            assert self.executor.effect_state_index is not None, 'Effect action index must be set if the target predicate will be updated from simulation.'
             expr_string = expr.cached_string(-1)
             for entry_values in _expand_tensor_indices(feature, argument_values):
                 if self.executor.optimistic_execution:
@@ -995,7 +1066,7 @@ class CrowExecutionCSPVisitor(CrowExecutionDefaultVisitor):
                     opt_identifier = self.csp.new_var(feature.dtype, wrap=True)
                     feature.tensor_optimistic_values[entry_values] = opt_identifier.identifier
                     self.csp.add_constraint(Constraint(
-                        SimulationFluentConstraintFunction(self.executor.effect_action_index, expr.predicate.function, entry_values, is_execution_constraint=self.executor.effect_update_from_execution),
+                        SimulationFluentConstraintFunction(self.executor.effect_state_index, expr.predicate.function, entry_values, is_execution_constraint=self.executor.effect_update_from_execution),
                         [],
                         opt_identifier,
                         note=f'{expr_string}::{entry_values}' if len(entry_values) > 0 else expr_string

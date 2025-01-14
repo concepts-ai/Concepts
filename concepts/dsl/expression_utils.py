@@ -16,7 +16,7 @@ from concepts.dsl.dsl_types import ObjectConstant, Variable, ObjectType
 from concepts.dsl.dsl_functions import Function
 from concepts.dsl.value import ValueBase, ListValue
 from concepts.dsl.expression import ExpressionDefinitionContext, Expression, ObjectOrValueOutputExpression, ValueOutputExpression, VariableExpression, ObjectConstantExpression, ConstantExpression, ListCreationExpression, ListFunctionApplicationExpression, FunctionApplicationExpression, BoolExpression, QuantificationExpression
-from concepts.dsl.expression import ListExpansionExpression, GeneralizedQuantificationExpression, ObjectCompareExpression, PredicateEqualExpression, FindAllExpression
+from concepts.dsl.expression import ListExpansionExpression, GeneralizedQuantificationExpression, ObjectCompareExpression, PredicateEqualExpression, FindAllExpression, FindOneExpression
 from concepts.dsl.expression import ValueCompareExpression, VariableAssignmentExpression, AssignExpression, ConditionalSelectExpression, ConditionalAssignExpression, DeicticSelectExpression, DeicticAssignExpression
 from concepts.dsl.expression import is_and_expr, is_or_expr, is_not_expr, is_forall_expr, is_exists_expr, BoolOpType, QuantificationOpType
 from concepts.dsl.expression_visitor import IdentityExpressionVisitor
@@ -246,12 +246,20 @@ class FlattenExpressionVisitor(IdentityExpressionVisitor):
         return ValueCompareExpression(expr.compare_op, self.visit(expr.lhs), self.visit(expr.rhs))
 
     def visit_quantification_expression(self, expr: QuantificationExpression) -> QuantificationExpression:
+        if expr.quantification_op is QuantificationOpType.BATCHED:
+            with self.ctx.with_variables(expr.variable):
+                return QuantificationExpression(expr.quantification_op, expr.variable, self.visit(expr.expression))
+
         with self.make_dummy_variable(expr.variable) as dummy_variable:
             return QuantificationExpression(expr.quantification_op, dummy_variable, self.visit(expr.expression))
 
     def visit_find_all_expression(self, expr: FindAllExpression) -> FindAllExpression:
         with self.make_dummy_variable(expr.variable) as dummy_variable:
             return FindAllExpression(dummy_variable, self.visit(expr.expression))
+
+    def visit_find_one_expression(self, expr: FindOneExpression) -> FindOneExpression:
+        with self.make_dummy_variable(expr.variable) as dummy_variable:
+            return FindOneExpression(dummy_variable, self.visit(expr.expression))
 
     def visit_predicate_equal_expression(self, expr: PredicateEqualExpression) -> PredicateEqualExpression:
         return type(expr)(self.visit(expr.predicate), self.visit(expr.value))

@@ -9,13 +9,22 @@
 # Distributed under terms of the MIT license.
 
 import ast
-from typing import Optional, Tuple, Sequence
+from typing import Optional, Sequence, Tuple, List
 from concepts.dsl.dsl_types import TypeBase, ObjectType, ValueType, BOOL, INT64, FLOAT32, Variable
 from concepts.dsl.dsl_functions import Function, FunctionType
 from concepts.dsl.dsl_domain import DSLDomainBase
 from concepts.dsl.expression import ExpressionDefinitionContext, ValueOutputExpression, get_expression_definition_context, get_types
-from concepts.dsl.expression import ConstantExpression, NotExpression, AndExpression, OrExpression, ForallExpression, ExistsExpression, FunctionApplicationExpression, ObjectCompareExpression, ValueCompareExpression, CompareOpType
+from concepts.dsl.expression import ConstantExpression, NotExpression, AndExpression, OrExpression, ForallExpression, ExistsExpression, FunctionApplicationExpression, ObjectCompareExpression, ValueCompareExpression, CompareOpType, VariableAssignmentExpression
 from concepts.dsl.parsers.parser_base import ParserBase
+
+
+class FOLProgramAssignmentExpression(VariableAssignmentExpression):
+    def __init__(self, variable: Variable, value: ValueOutputExpression):
+        self.variable = variable
+        self.value = value
+
+    def __str__(self):
+        return f'{self.variable} = {self.value}'
 
 
 class FOLPythonParser(ParserBase):
@@ -80,6 +89,12 @@ class FOLPythonParser(ParserBase):
     def parse_domain_string(self, string: str) -> DSLDomainBase:
         raise NotImplementedError('FOLPythonParser does not support parsing domain definition.')
 
+    def parse_multiple_expressions(self, string: str, arguments: Sequence[Variable] = tuple()) -> Tuple[ValueOutputExpression, ...]:
+        module = ast.parse(string)
+        expressions = ast_get_multiple_expressions(module)
+        with ExpressionDefinitionContext(*arguments, domain=self.domain).as_default():
+            return tuple(self._parse_expression_inner(expression) for expression in expressions)
+
     def parse_expression(self, string: str, arguments: Sequence[Variable] = tuple()) -> ValueOutputExpression:
         module = ast.parse(string)
         expression = ast_get_expression(module)
@@ -120,6 +135,15 @@ class FOLPythonParser(ParserBase):
                 return OrExpression(*[self._parse_expression_inner(value) for value in expression.values])
             else:
                 raise NotImplementedError(f'BoolOp {expression.op} is not supported.')
+        elif isinstance(expression, ast.Assign):
+            assert len(expression.targets) == 1, f'Expect one target for assignment, got {len(expression.targets)}.'
+            assert isinstance(expression.targets[0], ast.Name), f'Expect a name for assignment, got {expression.targets[0]}.'
+            var_name = expression.targets[0].id
+            value = self._parse_expression_inner(expression.value)
+            var_type = value.return_type
+            var = Variable(var_name, var_type)
+            ctx.add_variables(var)
+            return FOLProgramAssignmentExpression(var, value)
         elif isinstance(expression, ast.Name):
             return ctx[expression.id]
         elif isinstance(expression, ast.Constant):
@@ -275,8 +299,22 @@ def ast_get_expression(module: ast.Module) -> ast.AST:
         the expression.
     """
     assert len(module.body) == 1, f'Expect one single expression, got {len(module.body)}.'
-    assert isinstance(module.body[0], ast.Expr), f'Expect an expression, got {module.body[0]}.'
-    return module.body[0].value
+    assert isinstance(module.body[0], (ast.Expr, ast.Assign)), f'Expect an expression, got {module.body[0]}.'
+    return module.body[0].value if isinstance(module.body[0], ast.Expr) else module.body[0]
+
+
+def ast_get_multiple_expressions(module: ast.Module) -> List[ast.AST]:
+    """Get the multiple expressions in the module.
+
+    Args:
+        module: the module. It should contains multiple expressions.
+
+    Returns:
+        the expressions.
+    """
+    for node in module.body:
+        assert isinstance(node, (ast.Expr, ast.Assign)), f'Expect an expression, got {node}.'
+    return [node.value if isinstance(node, ast.Expr) else node for node in module.body]
 
 
 def ast_get_simple_function(function: ast.FunctionDef) -> Tuple[Tuple[Variable, ...], TypeBase, ast.AST]:

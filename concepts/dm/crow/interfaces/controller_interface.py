@@ -16,6 +16,7 @@ import contextlib
 from typing import Optional, Tuple, Dict, Callable
 
 from concepts.dsl.tensor_value import TensorValue
+from concepts.dm.crow.behavior import CrowEffectApplier
 from concepts.dm.crow.controller import CrowControllerApplier
 from concepts.dm.crow.crow_domain import CrowState
 from concepts.dm.crow.executors.crow_executor import CrowExecutor
@@ -33,9 +34,10 @@ class CrowControllerInterfaceBase(object):
     The convention of the controller interface is that it takes a controller name and a list of arguments, and then
     calls the corresponding controller function with the arguments. If the execution fails, it should raise an exception.
     """
-    def __init__(self, executor: Optional[CrowExecutor] = None):
+    def __init__(self, executor: Optional[CrowExecutor] = None, mock: bool = False):
         self._executor = executor
         self._controllers = dict()
+        self._mock = mock
 
     @property
     def executor(self) -> Optional[CrowExecutor]:
@@ -53,6 +55,8 @@ class CrowControllerInterfaceBase(object):
         return self
 
     def step(self, action: CrowControllerApplier, **kwargs) -> None:
+        if isinstance(action, CrowEffectApplier):
+            return
         return self.step_internal(action.name, *action.arguments, **kwargs)
 
     def step_without_error(self, action: CrowControllerApplier, **kwargs) -> bool:
@@ -63,6 +67,13 @@ class CrowControllerInterfaceBase(object):
         return True
 
     def step_internal(self, name: str, *args, **kwargs) -> None:
+        if self._mock:
+            print('Mocked controller:', name)
+            args = [arg.item() if isinstance(arg, TensorValue) and arg.dtype.is_pyobj_value_type else arg for arg in args]
+            for i, arg in enumerate(args):
+                print(f'  Arg {i}: {arg}')
+            return
+
         if name not in self.controllers:
             raise ValueError(f"Controller {name} not found.")
         args = [arg.item() if isinstance(arg, TensorValue) and arg.dtype.is_pyobj_value_type else arg for arg in args]
@@ -91,9 +102,9 @@ class CrowSimulationControllerInterface(CrowControllerInterfaceBase):
             return False, state_identifier
         return True, state_identifier
 
-    def step_internal(self, name: str, *args, **kwargs) -> None:
+    def step(self, action: CrowControllerApplier, **kwargs) -> None:
         try:
-            return super().step_internal(name, *args, **kwargs)
+            return super().step(action, **kwargs)
         finally:
             self.increment_action_counter()
 
@@ -110,6 +121,9 @@ class CrowSimulationControllerInterface(CrowControllerInterfaceBase):
         raise NotImplementedError
 
     def restore_state(self, state_identifier: int, **kwargs):
+        raise NotImplementedError
+
+    def restore_state_keep(self, state_identifier: int, action_counter: Optional[int] = None, **kwargs):
         raise NotImplementedError
 
     def get_crow_state(self) -> CrowState:

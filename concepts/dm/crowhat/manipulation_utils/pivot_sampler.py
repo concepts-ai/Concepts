@@ -15,7 +15,7 @@ import open3d as o3d
 
 from concepts.dm.crowhat.manipulation_utils.contact_point_sampler import ContactPointProposal, gen_candidate_pose_b_from_two_contact_points, gen_robot_qpos_from_attached_object_pose, get_desired_pose_b_from_current_object_poses
 from concepts.dm.crowhat.manipulation_utils.contact_point_sampler import pairwise_sample, gen_contact_point_with_normal_constraint
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface
 
 from concepts.dm.crowhat.world.planning_world_interface import PlanningWorldInterface
 from concepts.math.rotationlib_xyzw import axisangle2quat, pos_quat2mat, quat_identity, quat_mul, rotate_vector, slerp
@@ -142,7 +142,7 @@ class SingleArmIndirectPivotParameter(NamedTuple):
 
 
 def gen_single_arm_indirect_pivot_parameter(
-    planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface, object_id: int, tool_id: int, support_id: int, rotation: RotationAlongAxis,
+    planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface, object_id: int, tool_id: int, support_id: int, rotation: RotationAlongAxis,
     max_returns: int = 1, contact_point_max_returns: int = 100, tool_pose_nr_trials: int = 4,
     pre_contact_distance: float = 0.01, post_contact_distance: float = 0.005,
     verbose: bool = False
@@ -166,7 +166,7 @@ def gen_single_arm_indirect_pivot_parameter(
                     return
 
 
-def check_collision_for_two_arm_indirect_pivot_parameters(planning_world: PlanningWorldInterface, robot1: SingleArmMotionPlanningInterface, robot2: SingleArmMotionPlanningInterface, pivot1: SingleArmIndirectPivotParameter, pivot2: SingleArmIndirectPivotParameter) -> bool:
+def check_collision_for_two_arm_indirect_pivot_parameters(planning_world: PlanningWorldInterface, robot1: SingleGroupMotionPlanningInterface, robot2: SingleGroupMotionPlanningInterface, pivot1: SingleArmIndirectPivotParameter, pivot2: SingleArmIndirectPivotParameter) -> bool:
     with planning_world.checkpoint_world():
         robot1.set_qpos(pivot1.robot_qpos)
         robot2.set_qpos(pivot2.robot_qpos)
@@ -184,7 +184,7 @@ def check_collision_for_two_arm_indirect_pivot_parameters(planning_world: Planni
 
 
 def calc_single_arm_indirect_pivot_qpos_trajectory(
-    planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface, pivot_parameter: SingleArmIndirectPivotParameter,
+    planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface, pivot_parameter: SingleArmIndirectPivotParameter,
 ) -> Optional[List[np.ndarray]]:
     object_pose_trajectory = calc_object_rotation_pose_trajectory(planning_world, pivot_parameter.object_id, pivot_parameter.support_id, pivot_parameter.rotation, nr_steps=10, min_distance_from_support=0.01)
     tool_pose_trajectory = [(pivot_parameter.b_pose[0], pivot_parameter.b_pose[1])]
@@ -235,7 +235,7 @@ def calc_single_arm_indirect_pivot_qpos_trajectory(
 
 
 def calc_single_arm_indirect_pivot_ee_pose_trajectory(
-    planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface,
+    planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface,
     pivot_parameter: SingleArmIndirectPivotParameter,
 ) -> Optional[List[Tuple[Vec3f, Vec4f]]]:
     object_pose_trajectory = calc_object_rotation_pose_trajectory(planning_world, pivot_parameter.object_id, pivot_parameter.support_id, pivot_parameter.rotation, nr_steps=10, min_distance_from_support=0.01)

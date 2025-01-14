@@ -9,19 +9,21 @@
 # Distributed under terms of the MIT license.
 
 import numpy as np
-from typing import Any, Optional, Union, Iterator, Tuple, List, Dict
+from dataclasses import dataclass
+from typing import Any, Optional, Union, Iterator, Tuple, List, Dict, Callable
 
+import jacinle
 from concepts.algorithm.configuration_space import BoxConfigurationSpace, CollisionFreeProblemSpace
 from concepts.algorithm.rrt.rrt import birrt
 from concepts.dm.crow.interfaces.controller_interface import CrowControllerExecutionError
-from concepts.dm.crowhat.manipulation_utils.pose_utils import canonicalize_pose, pose_difference
+from concepts.dm.crowhat.manipulation_utils.pose_utils import canonicalize_pose, pose_difference, pose_distance2
 from concepts.dm.crowhat.world.planning_world_interface import AttachmentInfo, PlanningWorldInterface
 from concepts.math.range import Range
 from concepts.math.frame_utils_xyzw import get_transform_a_to_b, solve_ee_from_tool, calc_ee_quat_from_directions
 from concepts.utils.typing_utils import VecNf, Vec3f, Vec4f
 
 __all__ = [
-    'SingleArmMotionPlanningInterface', 'MotionPlanningResult',
+    'SingleGroupMotionPlanningInterface', 'MotionPlanningResult', 'MotionPlanningContactTimeCollisionCheckingArguments',
     'RobotControllerExecutionFailed', 'RobotControllerExecutionContext', 'RobotArmJointTrajectory',
     'SingleArmControllerInterface'
 ]
@@ -53,7 +55,13 @@ class MotionPlanningResult(object):
         return cls(False, None, error)
 
 
-class SingleArmMotionPlanningInterface(object):
+@dataclass
+class MotionPlanningContactTimeCollisionCheckingArguments(object):
+    qpos_range: float
+    collision_tol: float
+
+
+class SingleGroupMotionPlanningInterface(object):
     """General interface for robot arms. It specifies a set of basic operations for motion planning:
 
     - ``ik``: inverse kinematics.
@@ -65,6 +73,9 @@ class SingleArmMotionPlanningInterface(object):
 
     def __init__(self, planning_world: Optional[PlanningWorldInterface] = None):
         self._planning_world = planning_world
+        self._rrt_collision_distance = 0.01
+        self._configuration_space_max_stepdiff = 0.02
+        self._configuration_space_extra_validation_func = None
 
     @property
     def planning_world(self) -> Optional[PlanningWorldInterface]:
@@ -73,10 +84,19 @@ class SingleArmMotionPlanningInterface(object):
     def set_planning_world(self, planning_world: Optional[PlanningWorldInterface]):
         self._planning_world = planning_world
 
+    def set_rrt_collision_distance(self, distance: Optional[float]):
+        self._rrt_collision_distance = distance
+
     def get_default_configuration_space_max_stepdiff(self) -> float:
         """Get the default maximum step difference for the configuration space. Default is 0.02 rad."""
         # return np.pi / 180 * 5
-        return 0.02
+        return self._configuration_space_max_stepdiff
+
+    def set_default_configuration_space_max_stepdiff(self, max_stepdiff: float):
+        self._configuration_space_max_stepdiff = max_stepdiff
+
+    def set_configuration_space_extra_validation_func(self, extra_validation_func: Optional[Callable[[np.ndarray], bool]]):
+        self._configuration_space_extra_validation_func = extra_validation_func
 
     def get_configuration_space(self, max_stepdiff: Optional[float] = None) -> BoxConfigurationSpace:
         if max_stepdiff is None:
@@ -85,21 +105,41 @@ class SingleArmMotionPlanningInterface(object):
         lower, upper = self.joint_limits
         return BoxConfigurationSpace(
             [Range(l, u) for l, u in zip(lower, upper)],
-            cspace_max_stepdiff=max_stepdiff
+            cspace_max_stepdiff=max_stepdiff,
+            extra_validation_func=self._configuration_space_extra_validation_func
         )
 
-    def get_collision_free_problem_space(self, ignored_collision_bodies: Optional[List[Union[str, int]]] = None, max_stepdiff: Optional[float] = None) -> CollisionFreeProblemSpace:
-        if ignored_collision_bodies is not None:
-            def collide_fn(qpos: VecNf):
-                return self.check_collision(qpos, ignored_collision_bodies=ignored_collision_bodies)
-        else:
-            collide_fn = self.check_collision
-        return CollisionFreeProblemSpace(self.get_configuration_space(max_stepdiff=max_stepdiff), collide_fn)
+    def get_collision_free_problem_space(
+        self,
+        ignored_collision_bodies: Optional[List[Union[str, int]]] = None,
+        max_stepdiff: Optional[float] = None,
+        collision_tol: Optional[float] = None,
+        move_from_contact_collision_args: Optional[MotionPlanningContactTimeCollisionCheckingArguments] = None,
+        move_to_contact_collision_args: Optional[MotionPlanningContactTimeCollisionCheckingArguments] = None,
+        move_from_qpos: Optional[VecNf] = None,
+        move_to_qpos: Optional[VecNf] = None
+    ) -> CollisionFreeProblemSpace:
+        jacinle.lf_indent_print(f'Get collision free problem space move_from_contact_collision_args: {move_from_contact_collision_args} move_to_contact_collision_args: {move_to_contact_collision_args}')
+        # Initialize the CollisionChecker
+        collision_checker = CollisionChecker(
+            self.check_collision,
+            ignored_collision_bodies=ignored_collision_bodies,
+            collision_tol=collision_tol,
+            move_from_contact_collision_args=move_from_contact_collision_args,
+            move_to_contact_collision_args=move_to_contact_collision_args,
+            move_from_qpos=move_from_qpos,
+            move_to_qpos=move_to_qpos,
+        )
+
+        # Use the collision_checker instance as the collide_fn
+        return CollisionFreeProblemSpace(self.get_configuration_space(max_stepdiff=max_stepdiff), collision_checker)
 
     def check_collision(
         self, qpos: Optional[VecNf] = None, ignore_self_collision: bool = True,
-        ignored_collision_bodies: Optional[List[Union[str, int]]] = None, checkpoint_world_state: Optional[bool] = None,
-        return_list: bool = False
+        ignored_collision_bodies: Optional[List[Union[str, int]]] = None,
+        max_distance: Optional[float] = None,
+        checkpoint_world_state: Optional[bool] = None,
+        return_list: bool = False, verbose: bool = False
     ) -> Union[bool, List[Union[str, int]]]:
         """Check if the current configuration is in collision.
 
@@ -116,23 +156,58 @@ class SingleArmMotionPlanningInterface(object):
         if checkpoint_world_state is None:
             checkpoint_world_state = qpos is not None
 
+        backup_qpos = None
         if checkpoint_world_state:
-            with self.planning_world.checkpoint_world():
-                return self.check_collision(qpos, ignore_self_collision=ignore_self_collision, ignored_collision_bodies=ignored_collision_bodies, checkpoint_world_state=False, return_list=return_list)
+            backup_qpos = self.get_qpos().copy()
 
         if qpos is not None:
             self.set_qpos(qpos)
 
+        if ignored_collision_bodies is None:
+            ignored_collision_bodies = list()
+
         if ignore_self_collision:
-            if ignored_collision_bodies is None:
-                ignored_collision_bodies = list()
             if (attached := self.get_attached_objects()) is not None:
                 for attachment in attached:
                     ignored_collision_bodies.append(attachment.body_b)
+            ignored_collision_bodies.append(self.body_id)
 
-        return self.planning_world.check_collision_with_other_objects(self.body_id, ignore_self_collision=ignore_self_collision, ignored_collision_bodies=ignored_collision_bodies, return_list=return_list)
+        try:
+            rv = self.planning_world.check_collision_with_other_objects(
+                self.body_id, ignore_self_collision=ignore_self_collision, ignored_collision_bodies=ignored_collision_bodies, max_distance=max_distance,
+                return_list=return_list, verbose=verbose
+            )
+            if rv:
+                return True
 
-    def rrt_collision_free(self, qpos1: np.ndarray, qpos2: Optional[np.ndarray] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None, smooth_fine_path: bool = False, **kwargs) -> Tuple[bool, Optional[List[np.ndarray]]]:
+            # TODO(Jiayuan Mao @ 2024/12/20): Fix the attached object collision checking.
+            # In theory, we should only ignore the collision between the end effector and the attached object, but keep the collision checking between
+            # the attached object and the rest part of the robot body.
+            if (attached_objects := self.get_attached_objects()) is not None:
+                for attachment in attached_objects:
+                    if attachment.body_b in ignored_collision_bodies:
+                        ignored_collision_bodies.remove(attachment.body_b)
+                for attachment in attached_objects:
+                    rv = self.planning_world.check_collision_with_other_objects(
+                        attachment.body_b, ignore_self_collision=ignore_self_collision, ignored_collision_bodies=ignored_collision_bodies, max_distance=max_distance,
+                        return_list=return_list, verbose=verbose
+                    )
+                    if rv:
+                        return True
+
+            return False
+        finally:
+            if checkpoint_world_state:
+                self.set_qpos(backup_qpos)
+
+    def rrt_collision_free(
+        self, qpos1: np.ndarray, qpos2: Optional[np.ndarray] = None,
+        ignored_collision_bodies: Optional[List[Union[str, int]]] = None, smooth_fine_path: bool = False,
+        move_from_contact_collision_args: Optional[MotionPlanningContactTimeCollisionCheckingArguments] = None,
+        move_to_contact_collision_args: Optional[MotionPlanningContactTimeCollisionCheckingArguments] = None,
+        verbose: bool = False,
+        **inner_rrt_kwargs
+    ) -> Tuple[bool, Optional[List[np.ndarray]]]:
         """RRT-based collision-free path planning.
 
         Args:
@@ -140,6 +215,8 @@ class SingleArmMotionPlanningInterface(object):
             qpos2: End position. If None, the current position is used.
             ignored_collision_bodies: IDs of the objects to ignore in collision checking. Defaults to None.
             smooth_fine_path: Whether to smooth the path. Defaults to False.
+            move_from_contact_collision_args: Collision checking arguments for the start position. Defaults to None. Useful when the starting position is in contact with the environment.
+            move_to_contact_collision_args: Collision checking arguments for the end position. Defaults to None. Useful when the ending position is in contact with the environment.
             kwargs: Additional arguments.
 
         Returns:
@@ -150,9 +227,14 @@ class SingleArmMotionPlanningInterface(object):
             qpos2 = qpos1
             qpos1 = self.get_qpos()
 
-        cfree_pspace = self.get_collision_free_problem_space(ignored_collision_bodies=ignored_collision_bodies)
+        cfree_pspace = self.get_collision_free_problem_space(
+            ignored_collision_bodies=ignored_collision_bodies, collision_tol=self._rrt_collision_distance,
+            move_from_contact_collision_args=move_from_contact_collision_args,
+            move_to_contact_collision_args=move_to_contact_collision_args,
+            move_from_qpos=qpos1, move_to_qpos=qpos2
+        )
         with self.planning_world.checkpoint_world():
-            path = birrt(cfree_pspace, qpos1, qpos2, smooth_fine_path=smooth_fine_path, **kwargs)
+            path = birrt(cfree_pspace, qpos1, qpos2, smooth_fine_path=smooth_fine_path, verbose=verbose, **inner_rrt_kwargs)
             if path[0] is not None:
                 return True, path[0]
             return False, None
@@ -229,10 +311,10 @@ class SingleArmMotionPlanningInterface(object):
     def _add_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None, ee_to_object: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
         raise NotImplementedError()
 
-    def remove_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None):
+    def remove_attachment(self, body: Union[str, int, None], link: Optional[int] = None, self_link: Optional[int] = None):
         self._remove_attachment(body, link, self_link)
 
-    def _remove_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None):
+    def _remove_attachment(self, body: Union[str, int, None], link: Optional[int] = None, self_link: Optional[int] = None):
         raise NotImplementedError()
 
     def fk(self, qpos: VecNf) -> Tuple[Vec3f, Vec4f]:
@@ -279,8 +361,24 @@ class SingleArmMotionPlanningInterface(object):
         next_pose = canonicalize_pose(next_pose)
         J = self.jacobian(current_qpos)  # 6 x N
 
-        solution = np.linalg.lstsq(J, pose_difference(current_pose, next_pose), rcond=None)[0]
+        solution = np.linalg.pinv(J) @ pose_difference(current_pose, next_pose)
+        # solution = np.linalg.lstsq(J, pose_difference(current_pose, next_pose), rcond=None)[0]
         return solution
+
+    def calc_differential_ik(self, current_qpos: VecNf, current_pose: Tuple[Vec3f, Vec4f], next_pose: Tuple[Vec3f, Vec4f], max_iterations: int = 10, pos_error_tol: float = 1e-3, rot_error_tol: float = 1e-3) -> np.ndarray:
+        for i in range(max_iterations):
+            if i > 0:
+                current_pose = self.fk(current_qpos)
+
+            pos_error, rot_error = pose_distance2(current_pose, next_pose)
+            if pos_error < pos_error_tol and rot_error < rot_error_tol:
+                break
+
+            qpos = np.asarray(current_qpos) + self.calc_differential_ik_qpos_diff(current_qpos, current_pose, next_pose)
+            lower, upper = self.joint_limits
+            current_qpos = np.clip(qpos, lower, upper)
+
+        return current_qpos
 
     def calc_ee_pose_from_single_attached_object_pose(self, pos: Vec3f, quat: Vec4f) -> Tuple[Vec3f, Vec4f]:
         """Get the end-effector pose given the desired pose of the attached object."""
@@ -387,3 +485,39 @@ class SingleArmControllerInterface(RobotControllerInterfaceBase):
     def move_place(self, placing_trajectory: RobotArmJointTrajectory) -> None:
         self.move_qpos_trajectory(placing_trajectory)
         self.open_gripper()
+
+
+def _l1_distance(a: np.ndarray, b: np.ndarray) -> float:
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
+    return np.linalg.norm(a - b, ord=1)
+
+
+class CollisionChecker:
+    def __init__(
+        self,
+        check_collision_fn,
+        ignored_collision_bodies: Optional[List[Union[str, int]]] = None,
+        collision_tol: Optional[float] = None,
+        move_from_contact_collision_args: Optional[MotionPlanningContactTimeCollisionCheckingArguments] = None,
+        move_to_contact_collision_args: Optional[MotionPlanningContactTimeCollisionCheckingArguments] = None,
+        move_from_qpos: Optional[VecNf] = None,
+        move_to_qpos: Optional[VecNf] = None,
+    ):
+        self.check_collision_fn = check_collision_fn
+        self.ignored_collision_bodies = ignored_collision_bodies
+        self.collision_tol = collision_tol
+        self.move_from_contact_collision_args = move_from_contact_collision_args
+        self.move_to_contact_collision_args = move_to_contact_collision_args
+        self.move_from_qpos = move_from_qpos
+        self.move_to_qpos = move_to_qpos
+
+    def __call__(self, qpos: VecNf) -> bool:
+        current_collision_tol = self.collision_tol
+        if self.move_from_contact_collision_args is not None:
+            if _l1_distance(qpos, self.move_from_qpos) < self.move_from_contact_collision_args.qpos_range:
+                current_collision_tol = self.move_from_contact_collision_args.collision_tol
+        if self.move_to_contact_collision_args is not None:
+            if _l1_distance(qpos, self.move_to_qpos) < self.move_to_contact_collision_args.qpos_range:
+                current_collision_tol = self.move_to_contact_collision_args.collision_tol
+        return self.check_collision_fn(qpos, ignored_collision_bodies=self.ignored_collision_bodies, max_distance=current_collision_tol)

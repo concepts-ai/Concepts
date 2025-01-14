@@ -337,7 +337,7 @@ class PDSketchTransformer(Transformer):
             generators: List[str]
             for target_variable_name in generators:
                 assert target_variable_name.startswith('?')
-                parameters, certifies, context, generates = _canonize_inline_generator_def_predicate(self.domain, target_variable_name, predicate)
+                parameters, certifies, context, generates = _canonicalize_inline_generator_def_predicate(self.domain, target_variable_name, predicate)
                 generator_name = f'gen-{predicate.name}-{target_variable_name[1:]}' if len(generators) > 1 else f'gen-{predicate.name}'
                 generator = self.domain.define_generator(generator_name, parameters, certifies, context, generates)
                 defined_generators.append(generator)
@@ -423,19 +423,19 @@ class PDSketchTransformer(Transformer):
 
         if precondition is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}").as_default():
-                precondition = _canonize_precondition(precondition)
+                precondition = _canonicalize_precondition(precondition)
         else:
             precondition = list()
 
         if effect is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}", is_effect_definition=True).as_default():
-                effect = _canonize_effect(effect)
+                effect = _canonicalize_effect(effect)
         else:
             effect = list()
 
         if controller is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}").as_default():
-                controller = _canonize_controller(controller)
+                controller = _canonicalize_controller(controller)
 
         self.domain.define_operator(name, parameters, precondition, effect, controller, **kwargs)
 
@@ -467,17 +467,17 @@ class PDSketchTransformer(Transformer):
 
         if precondition is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}").as_default():
-                precondition = tuple(_canonize_precondition(precondition))
+                precondition = tuple(_canonicalize_precondition(precondition))
         else:
             precondition = tuple()
         if effect is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}", is_effect_definition=True).as_default():
-                effect = tuple(_canonize_effect(effect))
+                effect = tuple(_canonicalize_effect(effect))
         else:
             effect = tuple()
         if controller is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}").as_default():
-                controller = _canonize_controller(controller)
+                controller = _canonicalize_controller(controller)
         else:
             controller = template_op.controller
 
@@ -536,13 +536,13 @@ class PDSketchTransformer(Transformer):
 
         if precondition is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, slot_functions_are_sgc=True, scope=f"regression::{name}").as_default():
-                precondition = tuple(_canonize_precondition(precondition))
+                precondition = tuple(_canonicalize_precondition(precondition))
         else:
             precondition = tuple()
 
         if side_effect is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, slot_functions_are_sgc=True, scope=f"regression::{name}").as_default():
-                side_effect = tuple(_canonize_effect(side_effect))
+                side_effect = tuple(_canonicalize_effect(side_effect))
         else:
             side_effect = tuple()
 
@@ -551,7 +551,7 @@ class PDSketchTransformer(Transformer):
 
         # if isinstance(goal, _FunctionApplicationImm):  # Simple goal
         #     with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"regression::{name}", is_effect_definition=True).as_default():
-        #         goal = tuple(_canonize_effect(goal))
+        #         goal = tuple(_canonicalize_effect(goal))
         # else:
         #     goal = tuple()
 
@@ -589,7 +589,7 @@ class PDSketchTransformer(Transformer):
                         item_kwargs = statement.kwargs
                         item_kwargs.setdefault('serializability', self.defaults['default_regression_rule_serializability'])
                         item_kwargs.setdefault('csp_serializability', self.defaults['default_regression_rule_csp_serializability'])
-                        expression = _canonize_regression_rule_expression_arguments(regression_rule, statement.arguments, item_kwargs)
+                        expression = _canonicalize_regression_rule_expression_arguments(regression_rule, statement.arguments, item_kwargs)
                         body_statements.append(expression)
                     else:
                         if statement.name in self.domain.operators:
@@ -602,14 +602,14 @@ class PDSketchTransformer(Transformer):
                                     specialize_kwargs[key.strip()] = True
                                 operator = self._make_macro_sub_operator(name, operator, i, **specialize_kwargs)
 
-                            expression = _canonize_operator_expression_arguments(operator, statement.arguments)
+                            expression = _canonicalize_operator_expression_arguments(operator, statement.arguments)
                             body_statements.append(expression)
                         elif statement.name in self.domain.regression_rules:
                             regression_rule = self.domain.regression_rules[statement.name]
                             item_kwargs = statement.kwargs
                             item_kwargs.setdefault('serializability', self.defaults['default_regression_rule_serializability'])
                             item_kwargs.setdefault('csp_serializability', self.defaults['default_regression_rule_csp_serializability'])
-                            expression = _canonize_regression_rule_expression_arguments(regression_rule, statement.arguments, item_kwargs)
+                            expression = _canonicalize_regression_rule_expression_arguments(regression_rule, statement.arguments, item_kwargs)
                             body_statements.append(expression)
                         elif statement.name == 'list-expand':
                             expression = statement.arguments[0].compose(self.domain.get_type('__totally_ordered_plan__'))
@@ -675,9 +675,9 @@ class PDSketchTransformer(Transformer):
         scope = None if name is None else f"axiom::{name}"
 
         with ExpressionDefinitionContext(*vars, domain=self.domain, scope=scope).as_default():
-            precondition = _canonize_precondition(precondition)
+            precondition = _canonicalize_precondition(precondition)
         with ExpressionDefinitionContext(*vars, domain=self.domain, scope=scope, is_effect_definition=True).as_default():
-            effect = _canonize_effect(effect)
+            effect = _canonicalize_effect(effect)
         self.domain.define_axiom(name, vars, precondition, effect, **kwargs)
 
     @inline_args
@@ -691,7 +691,7 @@ class PDSketchTransformer(Transformer):
             assert op_name in self.domain.operators, f'Unknown operator {op_name} in macro definition.'
             sub_op = self.domain.operators[op_name]
             sub_op = self._make_macro_sub_operator(name, sub_op, i)
-            sub_parameters = _canonize_simple_operator_expression_arguments(sub_op, sub_call.arguments, parameters_map)
+            sub_parameters = _canonicalize_simple_operator_expression_arguments(sub_op, sub_call.arguments, parameters_map)
             sub_operators.append(sub_op(*sub_parameters))
 
         self.domain.define_macro(name, parameters, sub_operators, **kwargs)
@@ -765,13 +765,13 @@ class PDSketchTransformer(Transformer):
 
         if precondition is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}").as_default():
-                precondition = _canonize_precondition(precondition)
+                precondition = _canonicalize_precondition(precondition)
         else:
             precondition = list()
 
         if effect is not None:
             with ExpressionDefinitionContext(*parameters, domain=self.domain, scope=f"action::{name}", is_effect_definition=True).as_default():
-                effect = _canonize_effect(effect)
+                effect = _canonicalize_effect(effect)
         else:
             effect = list()
 
@@ -785,7 +785,7 @@ class PDSketchTransformer(Transformer):
             assert op_name in self.domain.operators, f'Unknown operator {op_name} in macro definition.'
             sub_op = self.domain.operators[op_name]
             sub_op = self._make_macro_sub_operator(name, sub_op, i)
-            sub_parameters = _canonize_simple_operator_expression_arguments(sub_op, sub_call.arguments, parameters_map)
+            sub_parameters = _canonicalize_simple_operator_expression_arguments(sub_op, sub_call.arguments, parameters_map)
             sub_operators.append(sub_op(*sub_parameters))
 
         self.domain.define_macro(name, parameters, sub_operators, preconditions=precondition, effects=effect, **kwargs)
@@ -1176,7 +1176,7 @@ class _FunctionApplicationImm(object):
                         generators: List[str]
                         for i, target_variable_name in enumerate(generators):
                             assert target_variable_name.startswith('?')
-                            parameters, context, generates = _canonize_inline_generator_def(ctx, target_variable_name, arguments)
+                            parameters, context, generates = _canonicalize_inline_generator_def(ctx, target_variable_name, arguments)
                             generator_name = f'gen-{self.name}-{target_variable_name[1:]}' if len(generators) > 1 else f'gen-{self.name}'
                             domain.define_generator(generator_name, parameters=parameters, certifies=rv, context=context, generates=generates)
                     return rv
@@ -1274,7 +1274,7 @@ class _QuantifierApplicationImm(object):
         assert len(self.darg) == 1, 'Quantifier can only take one argument, got {}.'.format(len(self.darg))
         with ctx.new_variables(self.darg[0]):
             if ctx.is_effect_definition:
-                expr = _canonize_effect(self.expr)
+                expr = _canonicalize_effect(self.expr)
             else:
                 expr = self.expr.compose(expect_value_type)
 
@@ -1293,14 +1293,14 @@ class _QuantifierApplicationImm(object):
 
 
 @_log_function
-def _canonize_precondition(precondition: Union[_FunctionApplicationImm, _QuantifierApplicationImm]):
+def _canonicalize_precondition(precondition: Union[_FunctionApplicationImm, _QuantifierApplicationImm]):
     if isinstance(precondition, _FunctionApplicationImm) and precondition.name == 'and':
-        return list(itertools.chain(*[_canonize_precondition(pre) for pre in precondition.arguments]))
+        return list(itertools.chain(*[_canonicalize_precondition(pre) for pre in precondition.arguments]))
     return [Precondition(precondition.compose(BOOL), **precondition.annotation)]
 
 
 @_log_function
-def _canonize_effect(effect: Union[_FunctionApplicationImm, _QuantifierApplicationImm]):
+def _canonicalize_effect(effect: Union[_FunctionApplicationImm, _QuantifierApplicationImm]):
     if isinstance(effect, _QuantifierApplicationImm):
         output_effect = effect.compose()
         if isinstance(output_effect, list):
@@ -1309,7 +1309,7 @@ def _canonize_effect(effect: Union[_FunctionApplicationImm, _QuantifierApplicati
         assert isinstance(effect, _FunctionApplicationImm)
 
         if effect.name == 'and':
-            return list(itertools.chain(*[_canonize_effect(eff) for eff in effect.arguments]))
+            return list(itertools.chain(*[_canonicalize_effect(eff) for eff in effect.arguments]))
 
         if isinstance(effect.name, _MethodName):
             output_effect = effect.compose()
@@ -1327,7 +1327,7 @@ def _canonize_effect(effect: Union[_FunctionApplicationImm, _QuantifierApplicati
                 inner_effects = effect.arguments[1].arguments
             else:
                 inner_effects = [effect.arguments[1]]
-            inner_effects = list(itertools.chain(*[_canonize_effect(arg) for arg in inner_effects]))
+            inner_effects = list(itertools.chain(*[_canonicalize_effect(arg) for arg in inner_effects]))
             output_effect = list()
             for e in inner_effects:
                 assert isinstance(e.assign_expr, E.AssignExpression)
@@ -1344,7 +1344,7 @@ def _canonize_effect(effect: Union[_FunctionApplicationImm, _QuantifierApplicati
     return [Effect(output_effect, **effect.annotation)]
 
 
-def _canonize_controller(controller: _FunctionApplicationImm):
+def _canonicalize_controller(controller: _FunctionApplicationImm):
     controller_name = controller.name
     assert isinstance(controller_name, str)
 
@@ -1353,7 +1353,7 @@ def _canonize_controller(controller: _FunctionApplicationImm):
     return Implementation(controller_name, arguments)
 
 
-def _canonize_operator_expression_arguments(operator: Operator, arguments: List[Union[_FunctionApplicationImm, Variable, EllipsisType]]) -> OperatorApplicationExpression:
+def _canonicalize_operator_expression_arguments(operator: Operator, arguments: List[Union[_FunctionApplicationImm, Variable, EllipsisType]]) -> OperatorApplicationExpression:
     ctx = get_expression_definition_context()
     if arguments[-1] is Ellipsis:
         arguments = [_compose(ctx, arg, operator.arguments[i]) for i, arg in enumerate(arguments[:-1])]
@@ -1364,8 +1364,8 @@ def _canonize_operator_expression_arguments(operator: Operator, arguments: List[
     return OperatorApplicationExpression(operator, arguments)
 
 
-def _canonize_simple_operator_expression_arguments(operator: Operator, arguments: List[Union[Variable, EllipsisType]], parameters_map: Dict[str, Variable]) -> List[Union[Variable, UnnamedPlaceholder]]:
-    """The major difference between this function and `_canonize_operator_expression_arguments` is that this function returns
+def _canonicalize_simple_operator_expression_arguments(operator: Operator, arguments: List[Union[Variable, EllipsisType]], parameters_map: Dict[str, Variable]) -> List[Union[Variable, UnnamedPlaceholder]]:
+    """The major difference between this function and `_canonicalize_operator_expression_arguments` is that this function returns
     a list of combined [Variable, UnnamedPlaceholder] instances instead of a list of [Expression, UnnamedPlaceholder] instances.
     In the old-style macro definitions, the body of the macro is stored as a list of :class:`~concepts.dm.pdsketch.operator.OperatorApplier` instances,
     instead of an actual :class:`~concepts.dm.pdsketch.operator.OperatorApplicationExpression` instances."""
@@ -1385,14 +1385,14 @@ def _canonize_simple_operator_expression_arguments(operator: Operator, arguments
     return sub_parameters
 
 
-def _canonize_regression_rule_expression_arguments(regression_rule: RegressionRule, arguments: List[_FunctionApplicationImm], kwargs: Dict[str, Any]):
+def _canonicalize_regression_rule_expression_arguments(regression_rule: RegressionRule, arguments: List[_FunctionApplicationImm], kwargs: Dict[str, Any]):
     ctx = get_expression_definition_context()
     assert len(regression_rule.arguments) == len(arguments), 'Regression rule {} takes {} arguments, got {}.'.format(regression_rule.name, len(regression_rule.arguments), len(arguments))
     arguments = [_compose(ctx, arg, regression_rule.arguments[i]) for i, arg in enumerate(arguments)]
     return RegressionRuleApplicationExpression(regression_rule, arguments, **kwargs)
 
 
-def _canonize_inline_generator_def(ctx: ExpressionDefinitionContext, variable_name: str, arguments: List[Union[E.VariableExpression, E.ValueOutputExpression]]):
+def _canonicalize_inline_generator_def(ctx: ExpressionDefinitionContext, variable_name: str, arguments: List[Union[E.VariableExpression, E.ValueOutputExpression]]):
     parameters, context, generates = list(), list(), list()
     used_parameters = set()
 
@@ -1418,7 +1418,7 @@ def _canonize_inline_generator_def(ctx: ExpressionDefinitionContext, variable_na
     return parameters, context, generates
 
 
-def _canonize_inline_generator_def_predicate(domain: Domain, variable_name: str, predicate_def: Predicate):
+def _canonicalize_inline_generator_def_predicate(domain: Domain, variable_name: str, predicate_def: Predicate):
     parameters = predicate_def.arguments
     context, generates = list(), list()
 

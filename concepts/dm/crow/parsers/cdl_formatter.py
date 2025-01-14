@@ -91,6 +91,7 @@ def get_token_styles():
         'FORALL': 1,
         'FOREACH': 1,
         'FINDALL': 1,
+        'MEM_QUERY': 1,
         'FOR': 1,
         'IF': 1,
         'ELSE': 1,
@@ -111,7 +112,7 @@ def get_token_styles():
 
     for keyword in {
         '_PRAGMA_KEYWORD',  # #!pragma
-        'DOMAIN', 'PROBLEM',
+        'DOMAIN', 'PROBLEM', 'INCLUDE',
         'TYPEDEF', 'FEATURE', 'DEF', 'GENERATOR', 'UNDIRECTED_GENERATOR', 'CONTROLLER', 'ACTION', 'BEHAVIOR',
         'OBJECTS', 'GOAL', 'INIT',
         'EFFECT', 'EFF', 'PRE', 'BODY', 'IN', 'OUT', 'IS',
@@ -261,3 +262,4 @@ def print_cdl_terminal(string):
         else:
             print(token.value, end='')
         last_index = token.start_pos + len(token.value)
+

@@ -256,11 +256,11 @@ class FunctionDomain(DSLDomainBase):
         return dfs(dictionary)
 
 
-def _canonize_type(fn_domain: FunctionDomain, t: Optional[Union[str, TypeBase]]) -> Optional[TypeBase]:
+def _canonicalize_type(fn_domain: FunctionDomain, t: Optional[Union[str, TypeBase]]) -> Optional[TypeBase]:
     if t is None:
         return None
     if isinstance(t, UnionType):
-        return UnionType(*tuple(_canonize_type(fn_domain, t) for t in t.types))
+        return UnionType(*tuple(_canonicalize_type(fn_domain, t) for t in t.types))
     if isinstance(t, TypeBase):
         return t
 
@@ -268,23 +268,23 @@ def _canonize_type(fn_domain: FunctionDomain, t: Optional[Union[str, TypeBase]])
     return fn_domain.types[t]
 
 
-def _canonize_signature(fn_domain: FunctionDomain, signature: inspect.Signature) -> inspect.Signature:
-    """Canonize the signature of a function. Specifically, it converts the type names to the corresponding type objects.
+def _canonicalize_signature(fn_domain: FunctionDomain, signature: inspect.Signature) -> inspect.Signature:
+    """canonicalize the signature of a function. Specifically, it converts the type names to the corresponding type objects.
     For example, given a domain with types ``A`` and ``B``, the signature ``def f(a: 'A', b: 'B') -> A`` will be converted to
     the signature of ``def f(a: A, b: B) -> A``.
 
     Args:
         fn_domain: the function domain.
-        signature: the signature to be canonized.
+        signature: the signature to be canonicalized.
 
     Returns:
-        the canonized signature.
+        the canonicalized signature.
     """
     params = [
-        inspect.Parameter(v.name, v.kind, default=v.default, annotation=_canonize_type(fn_domain, v.annotation))
+        inspect.Parameter(v.name, v.kind, default=v.default, annotation=_canonicalize_type(fn_domain, v.annotation))
         for k, v in signature.parameters.items()
     ]
-    return_annotation = _canonize_type(fn_domain, signature.return_annotation)
+    return_annotation = _canonicalize_type(fn_domain, signature.return_annotation)
     return inspect.Signature(params, return_annotation=return_annotation)
 
 

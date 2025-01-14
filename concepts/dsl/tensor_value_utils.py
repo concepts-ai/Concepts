@@ -12,7 +12,8 @@ import torch
 from typing import Union, Sequence, List
 
 from concepts.dsl.tensor_value import TensorValue
-from concepts.dsl.tensor_state import StateObjectReference
+from concepts.dsl.tensor_state import StateObjectReference, StateObjectList
+from concepts.dsl.value import ListValue
 
 __all__= ['expand_argument_values']
 
@@ -56,7 +57,7 @@ def expand_argument_values(
                     batch_variables.append(var)
                     batch_sizes.append(arg.get_variable_size(var))
         else:
-            assert isinstance(arg, (int, str, slice, StateObjectReference)), arg
+            assert isinstance(arg, (int, str, slice, StateObjectReference, StateObjectList, ListValue)), arg
 
     masks = list()
     for i, arg in enumerate(argument_values):

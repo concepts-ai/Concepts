@@ -112,7 +112,7 @@ suite: simple_stmt | _NEWLINE _INDENT stmt+ _DEDENT
            | return_stmt
            | assert_once_stmt | assert_hold_stmt
            | commit_stmt
-?compound_stmt: if_stmt | bind_stmt
+?compound_stmt: if_stmt | bind_stmt | mem_query_stmt
               | ordered_suite
               | foreach_stmt | foreach_in_stmt | while_stmt
               // | compound_achieve_once_stmt | compound_achieve_hold_stmt | compound_untrack_stmt | compound_assert_once_stmt | compound_assert_hold_stmt | compound_return_stmt
@@ -134,13 +134,13 @@ assign_stmt: atom _assign_op test
 pass_stmt: "pass"
 commit_stmt: "commit" [_LLSQB decorator_kwargs _RRSQB]
 
-
 if_stmt: "if" test ":" suite ["else" ":" suite]
 foreach_stmt: "foreach" cs_list{typed_argument} ":" suite
 foreach_in_stmt: "foreach" cs_list{VARNAME} "in" cs_list{test} ":" suite
 while_stmt: "while" test ":" suite
 bind_stmt: "bind" cs_list{typed_argument} "where" ":" suite
          | "bind" cs_list{typed_argument} _NEWLINE -> bind_stmt_no_where
+mem_query_stmt: "mem_query" (findall_test _NEWLINE | findone_test _NEWLINE | assign_stmt)
 
 return_stmt: "return" test
 achieve_once_stmt: "achieve_once" cs_list{test}
@@ -177,6 +177,7 @@ assert_hold_stmt: "assert_hold" test
               | exists_in_test
               | findall_test
               | findone_test
+              | batched_test
 
 forall_test: "forall" cs_list{typed_argument} "where" ":" test
            | "forall" cs_list{typed_argument} ":" test
@@ -188,11 +189,13 @@ findall_test: "findall" typed_argument "where" ":" test
             | "findall" typed_argument ":" test
 findone_test: "findone" typed_argument "where" ":" test
             | "findone" typed_argument ":" test
+batched_test: "batched" cs_list{typed_argument} ":" test
 
 ?test_nocond: or_test
 ?test: or_test
      | or_test ("if" or_test "else" test) -> cond_test
      | forall_test | exists_test | forall_in_test | exists_in_test | findall_test | findone_test
+     | batched_test
 
 ?or_test: and_test ("or" and_test)*
 ?and_test: not_test_ ("and" not_test_)*

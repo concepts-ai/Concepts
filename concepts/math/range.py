@@ -27,6 +27,12 @@ class Range(object):
             high: The upper bound of the range.
             wrap_around: Whether the range wraps around, i.e. whether the upper bound is adjacent to the lower bound.
         """
+
+        # TODO(Jiayuan Mao @ 2024/12/20): this is a hack for "continuous" joints in pybullet.
+        # When a joint is continuous, they will actually give lower=0 and upper=-1...
+        # This is a hack to fix this issue. We should fix this in the future by considering those wheels as "wrap-around" joints.
+        if low > high:
+            low, high = high, low
         self.low = low
         self.high = high
         self.wrap_around = wrap_around
@@ -91,7 +97,7 @@ class Range(object):
             if self.contains(value):
                 return value
             else:
-                return None
+                return self.low if abs(value - self.low) < abs(value - self.high) else self.high
 
     def sample(self) -> float:
         """Sample a value from the range."""

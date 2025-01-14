@@ -22,7 +22,7 @@ from concepts.dm.crow.behavior import CrowBehaviorStatementOrdering, CrowBehavio
 from concepts.dm.crow.behavior_utils import match_applicable_behaviors, execute_object_bind
 
 from concepts.dm.crow.planners.regression_planning import CrowPlanningResult, CrowRegressionPlanner, ScopedCrowExpression
-from concepts.dm.crow.planners.regression_utils import canonize_bounded_variables
+from concepts.dm.crow.planners.regression_utils import canonicalize_bounded_variables
 from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_dfs_v1_utils import execute_behavior_effect_batch, unique_results
 
 __all__ = ['CrowRegressionPlannerDFSv1']
@@ -82,7 +82,7 @@ class CrowRegressionPlannerDFSv1(CrowRegressionPlanner):
             else:
                 last_results = self.dfs(_DFSNode(left, state.scopes, state.latest_scope, [ScopedCrowExpression(CrowAssertExpression(stmt.goal), scope_id)] + state.right_statements, state.depth + 1))
             for last_result in last_results:
-                rv = self.executor.execute(stmt.goal, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id))
+                rv = self.executor.execute(stmt.goal, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id))
                 jacinle.log_function.print('Last result:', last_result.controller_actions, 'Null Eval=', bool(rv.item()))
                 if bool(rv.item()):
                     new_results.append(last_result)
@@ -150,7 +150,7 @@ class CrowRegressionPlannerDFSv1(CrowRegressionPlanner):
     def _dfs_expand_primitive(self, last_result: CrowPlanningResult, stmt: Union[CrowBindExpression, CrowRuntimeAssignmentExpression, CrowAssertExpression, CrowControllerApplicationExpression], scope_id: int) -> Sequence[CrowPlanningResult]:
         """Apply a primitive statement on top of a particular planning result of the left branch."""
         if isinstance(stmt, CrowControllerApplicationExpression):
-            argument_values = [self.executor.execute(x, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id)) for x in stmt.arguments]
+            argument_values = [self.executor.execute(x, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id)) for x in stmt.arguments]
             for i, argv in enumerate(argument_values):
                 if isinstance(argv, StateObjectReference):
                     argument_values[i] = argv.name
@@ -158,11 +158,11 @@ class CrowRegressionPlannerDFSv1(CrowRegressionPlanner):
         elif isinstance(stmt, CrowBindExpression):
             if stmt.is_object_bind:
                 new_results = list()
-                for new_scope in execute_object_bind(self.executor, stmt, last_result.state, canonize_bounded_variables(last_result.scopes, scope_id)):
+                for new_scope in execute_object_bind(self.executor, stmt, last_result.state, canonicalize_bounded_variables(last_result.scopes, scope_id)):
                     new_scopes = last_result.scopes.copy()
                     new_scopes[scope_id] = new_scope
                     new_results.append(CrowPlanningResult(last_result.state, last_result.csp, last_result.controller_actions, new_scopes))
-                jacinle.log_function.print(f'Object binding results for {stmt} under scope {canonize_bounded_variables(last_result.scopes, scope_id)}:', len(new_results), 'states.')
+                jacinle.log_function.print(f'Object binding results for {stmt} under scope {canonicalize_bounded_variables(last_result.scopes, scope_id)}:', len(new_results), 'states.')
                 return new_results
             else:
                 raise NotImplementedError()
@@ -170,8 +170,8 @@ class CrowRegressionPlannerDFSv1(CrowRegressionPlanner):
             raise NotImplementedError()
         elif isinstance(stmt, CrowAssertExpression):
             # TODO(Jiayuan Mao @ 2024/03/19): implement the CSP tracking.
-            rv = self.executor.execute(stmt.bool_expr, state=last_result.state, bounded_variables=canonize_bounded_variables(last_result.scopes, scope_id))
-            jacinle.log_function.print(f'Assert {stmt.bool_expr} under scope {canonize_bounded_variables(last_result.scopes, scope_id)}:', bool(rv.item()))
+            rv = self.executor.execute(stmt.bool_expr, state=last_result.state, bounded_variables=canonicalize_bounded_variables(last_result.scopes, scope_id))
+            jacinle.log_function.print(f'Assert {stmt.bool_expr} under scope {canonicalize_bounded_variables(last_result.scopes, scope_id)}:', bool(rv.item()))
             if bool(rv.item()):
                 return [last_result]
             else:

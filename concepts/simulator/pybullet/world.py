@@ -17,6 +17,7 @@ import numpy as np
 import open3d as o3d
 import pybullet as p
 
+import jacinle
 from jacinle.utils.printing import indent_text
 from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate, rotate_vector_batch, pos_quat2mat
 from concepts.math.frame_utils_xyzw import compose_transformation
@@ -95,7 +96,12 @@ class JointState(collections.namedtuple('_JointState', ['position', 'velocity'])
     pass
 
 
-class LinkState(collections.namedtuple('_LinkState', ['position', 'orientation', 'linear_velocity', 'angular_velocity'])):
+class LinkState(collections.namedtuple('_LinkState', [
+    'position', 'orientation', 'linear_velocity', 'angular_velocity',
+    'local_pos', 'local_quat', 'parent_frame_pos', 'parent_frame_quat'
+])):
+    """parent_frame * local_pos = transform"""
+
     @property
     def pos(self):
         return self.position
@@ -618,15 +624,29 @@ class BulletWorld(object):
                 self.global_names.add_int_to_string(('link', body_id, j), link_name)
                 self.global_names.add_int_to_string(('link', body_id, j), body_name + '/' + link_name)
 
-    def get_body_name(self, body_id: int) -> str:
-        return self.body_names.int_to_string[body_id]
 
-    def get_link_name(self, body_id: int, link_id: int) -> str:
-        return self.link_names.int_to_string[(body_id, link_id)]
+    def get_body_names(self):
+        return self.body_names.int_to_string.values()
 
-    def get_body_index(self, body_name: Union[str, int]) -> int:
+    def get_body_id_and_names(self):
+        return self.body_names.int_to_string.items()
+
+    def get_body_name(self, body_id: Union[int, str]) -> str:
+        if isinstance(body_id, int):
+            return self.body_names.int_to_string[body_id]
+        return body_id
+
+    def get_link_name(self, body_id: int, link_id: int, trim_body_name: bool = True) -> str:
+        rv = self.link_names.int_to_string[(body_id, link_id)]
+        if trim_body_name:
+            return rv.split('/', 1)[1]
+        return rv
+
+    def get_body_index(self, body_name: Union[str, int], default: Optional[int] = None) -> Optional[int]:
         if isinstance(body_name, str):
-            return self.body_names.string_to_int[body_name]
+            if body_name in self.body_names.string_to_int:
+                return self.body_names.string_to_int[body_name]
+            return default
         return body_name
 
     def get_link_index(self, link_name: Union[str, LinkIdentifier, Tuple[int, int]]) -> LinkIdentifier:
@@ -634,9 +654,16 @@ class BulletWorld(object):
             return self.link_names.string_to_int[link_name]
         return link_name
 
-    def get_link_index_with_body(self, body_id: int, link_name: str) -> int:
+    def get_link_index_with_body(self, body_id: int, link_name: str, default: int = -1) -> int:
         body_name = self.body_names.int_to_string[body_id]
-        return self.link_names.string_to_int[body_name + '/' + link_name].link_id
+        identifier = body_name + '/' + link_name
+        if identifier in self.link_names.string_to_int:
+            return self.link_names.string_to_int[identifier].link_id
+        return default
+
+    def get_joint_index_with_body(self, body_id: int, joint_name: str) -> int:
+        body_name = self.body_names.int_to_string[body_id]
+        return self.joint_names.string_to_int[body_name + '/' + joint_name].joint_id
 
     def get_xpos(self, name, type=None):
         info = self.get_state(name, type)
@@ -819,11 +846,18 @@ class BulletWorld(object):
         if link_id == -1:
             state = p.getBasePositionAndOrientation(body_id, physicsClientId=self.client_id)
             vel = p.getBaseVelocity(body_id, physicsClientId=self.client_id)
-            return LinkState(np.array(state[0]), np.array(state[1]), np.array(vel[0]), np.array(vel[1]))
+            return LinkState(
+                np.array(state[0]), np.array(state[1]), np.array(vel[0]), np.array(vel[1]),
+                np.zeros(3), np.zeros(4), np.zeros(3), np.zeros(4),
+            )
         state = p.getLinkState(body_id, link_id, computeForwardKinematics=fk, computeLinkVelocity=fk, physicsClientId=self.client_id)
+
+        local_pos, local_quat = state[2], state[3]
+        parent_frame_pos, parent_frame_quat = state[4], state[5]
+
         if not fk:
-            return LinkState(np.array(state[0]), np.array(state[1]), np.array([0., 0., 0.]), np.array([0., 0., 0.]))
-        return LinkState(np.array(state[0]), np.array(state[1]), np.array(state[6]), np.array(state[7]))
+            return LinkState(np.array(state[0]), np.array(state[1]), np.array([0., 0., 0.]), np.array([0., 0., 0.]), local_pos, local_quat, parent_frame_pos, parent_frame_quat)
+        return LinkState(np.array(state[0]), np.array(state[1]), np.array(state[6]), np.array(state[7]), local_pos, local_quat, parent_frame_pos, parent_frame_quat)
 
     def get_link_state(self, link_name: str, fk=False) -> LinkState:
         return self.get_link_state_by_id(*self.link_names[link_name], fk=fk)
@@ -873,31 +907,24 @@ class BulletWorld(object):
     def perform_collision_detection(self):
         p.performCollisionDetection(physicsClientId=self.client_id)
 
-    def get_contact(self, a: Optional[Union[int, LinkIdentifier, str]] = None, b: Optional[Union[int, LinkIdentifier, str]] = None, update: bool = False) -> List[ContactInfo]:
+    def get_contact(self, a: Optional[Union[int, LinkIdentifier, str]] = None, b: Optional[Union[int, LinkIdentifier, str]] = None, max_distance: Optional[float] = None, update: bool = False) -> List[ContactInfo]:
+        if max_distance is None or max_distance <= 0:
+            rv = self._get_contact_simple(a, b, update=update)
+        else:
+            rv = self._get_contact_with_distance_impl(a, b, max_distance, update=update)
+
+        if max_distance is None:
+            return rv
+        return [c for c in rv if c.contact_distance <= max_distance]
+
+    def _get_contact_simple(self, a: Optional[Union[int, LinkIdentifier, str]] = None, b: Optional[Union[int, LinkIdentifier, str]] = None, update: bool = False) -> List[ContactInfo]:
+        """Get the contact information between two objects without considering the distant-contacts."""
         if update:
             p.performCollisionDetection(physicsClientId=self.client_id)
 
         kwargs = dict(physicsClientId=self.client_id)
-
-        def update_kwargs(name, value):
-            if value is not None:
-                if isinstance(value, int):
-                    kwargs['body' + name] = value
-                elif isinstance(value, (tuple, list)):
-                    kwargs['body' + name], kwargs['linkIndex' + name] = value
-                elif isinstance(value, str):
-                    value = self.global_names[value]
-                    if value[0] == 'body':
-                        kwargs['body' + name] = value[1]
-                    elif value[0] == 'link':
-                        kwargs['body' + name], kwargs['linkIndex' + name] = value[1:]
-                    else:
-                        raise ValueError('get_contact API only allows the specification of body or link.')
-                else:
-                    raise TypeError(f'get_contact API only allows the specification of body or link: got {value}')
-
-        update_kwargs('A', a)
-        update_kwargs('B', b)
+        _update_body_link_kwargs(kwargs, 'A', a)
+        _update_body_link_kwargs(kwargs, 'B', b)
         while True:
             contacts = p.getContactPoints(**kwargs)
             if contacts is not None:
@@ -905,6 +932,40 @@ class BulletWorld(object):
             # TODO(Jiayuan Mao @ 2023/04/13): sometimes PyBullet returns None, not sure why.
             time.sleep(0.001)
         return [ContactInfo(self, *c) for c in contacts]
+
+    def _get_contact_with_distance_impl(self, a: Optional[Union[int, LinkIdentifier, str]] = None, b: Optional[Union[int, LinkIdentifier, str]] = None, max_distance: float = 0.0, update: bool = False) -> List[ContactInfo]:
+        if a is None:
+            raise ValueError('a must be specified when max_distance is set.')
+
+        if update:
+            p.performCollisionDetection(physicsClientId=self.client_id)
+
+        kwargs = dict(physicsClientId=self.client_id, distance=max_distance)
+        _update_body_link_kwargs(kwargs, 'A', a)
+        if b is not None:
+            _update_body_link_kwargs(kwargs, 'B', b)
+            while True:
+                contacts = p.getClosestPoints(**kwargs)
+                if contacts is not None:
+                    break
+                # TODO(Jiayuan Mao @ 2023/04/13): sometimes PyBullet returns None, not sure why.
+                time.sleep(0.001)
+            return [ContactInfo(self, *c) for c in contacts]
+        else:
+            all_contacts = list()
+            for b in range(p.getNumBodies(physicsClientId=self.client_id)):
+                if b == kwargs['bodyA']:
+                    continue
+
+                _update_body_link_kwargs(kwargs, 'B', b)
+                while True:
+                    contacts = p.getClosestPoints(**kwargs)
+                    if contacts is not None:
+                        break
+                    # TODO(Jiayuan Mao @ 2023/04/13): sometimes PyBullet returns None, not sure why.
+                    time.sleep(0.001)
+                all_contacts.extend([ContactInfo(self, *c) for c in contacts])
+            return all_contacts
 
     def check_collision(self, a: Union[int, LinkIdentifier, str], b: Union[int, LinkIdentifier, str], update: bool = False) -> bool:
         return len(self.get_contact(a, b, update=update)) > 0
@@ -1036,7 +1097,7 @@ class BulletWorld(object):
         else:
             shapes = self.get_visual_shape_data_by_id(body_id)
 
-        for shape_info in self.get_collision_shape_data_by_id(body_id):
+        for shape_info in shapes:
             if shape_info.shape_type == p.GEOM_BOX:
                 pcd = self.get_pointcloud_box(shape_info.dimensions, points_per_geom)
             # elif shape_info.shape_type == client.p.GEOM_SPHERE:
@@ -1068,9 +1129,9 @@ class BulletWorld(object):
         linear_density = density ** (1. / 3.)
 
         x, y, z = np.meshgrid(
-            np.linspace(-dimensions[0] / 2, dimensions[0] / 2, int(np.ceil(dimensions[0] * linear_density))),
-            np.linspace(-dimensions[1] / 2, dimensions[1] / 2, int(np.ceil(dimensions[1] * linear_density))),
-            np.linspace(-dimensions[2] / 2, dimensions[2] / 2, int(np.ceil(dimensions[2] * linear_density))),
+            np.linspace(-dimensions[0] / 2, dimensions[0] / 2, max(2, int(np.ceil(dimensions[0] * linear_density)))),
+            np.linspace(-dimensions[1] / 2, dimensions[1] / 2, max(2, int(np.ceil(dimensions[1] * linear_density)))),
+            np.linspace(-dimensions[2] / 2, dimensions[2] / 2, max(2, int(np.ceil(dimensions[2] * linear_density)))),
         )
         return np.stack([x, y, z], axis=-1).reshape(-1, 3)
 
@@ -1214,9 +1275,9 @@ class BulletWorld(object):
             elif shape_info.shape_type == p.GEOM_SPHERE:
                 mesh = trimesh.creation.icosphere(subdivisions=3, radius=shape_info.dimensions[0])
             elif shape_info.shape_type == p.GEOM_CYLINDER:
-                mesh = trimesh.creation.cylinder(radius=shape_info.dimensions[0], height=shape_info.dimensions[1])
+                mesh = trimesh.creation.cylinder(radius=shape_info.dimensions[1], height=shape_info.dimensions[0])
             elif shape_info.shape_type == p.GEOM_CAPSULE:
-                mesh = trimesh.creation.capsule(radius=shape_info.dimensions[0], height=shape_info.dimensions[1])
+                mesh = trimesh.creation.capsule(radius=shape_info.dimensions[1], height=shape_info.dimensions[0])
             elif shape_info.shape_type == p.GEOM_MESH:
                 if mesh_filename is not None:
                     mesh = self.get_trimesh_mesh(mesh_filename, mesh_scale)
@@ -1252,6 +1313,30 @@ class BulletWorld(object):
 
     def transform_trimesh(self, mesh: Trimesh, pos, quat_xyzw):
         mat = pos_quat2mat(pos, quat_xyzw)
+        mesh = mesh.copy()
         mesh.apply_transform(mat)
         return mesh
+
+
+def pprint_contact_list(contacts: List[ContactInfo]):
+    table = [(contact.link_a_name, contact.link_b_name, contact.position_on_a, contact.position_on_b, contact.contact_distance) for contact in contacts]
+    print(jacinle.tabulate(table, headers=['Link A', 'Link B', 'Position on A', 'Position on B', 'Distance']))
+
+
+def _update_body_link_kwargs(kwargs, name, value):
+    if value is not None:
+        if isinstance(value, int):
+            kwargs['body' + name] = value
+        elif isinstance(value, (tuple, list)):
+            kwargs['body' + name], kwargs['linkIndex' + name] = value
+        elif isinstance(value, str):
+            value = self.global_names[value]
+            if value[0] == 'body':
+                kwargs['body' + name] = value[1]
+            elif value[0] == 'link':
+                kwargs['body' + name], kwargs['linkIndex' + name] = value[1:]
+            else:
+                raise ValueError('get_contact API only allows the specification of body or link.')
+        else:
+            raise TypeError(f'get_contact API only allows the specification of body or link: got {value}')
 

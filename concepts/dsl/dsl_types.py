@@ -228,7 +228,7 @@ class TypeBase(object):
             allow_self_list: if True, this type can be a list type derived from the other type.
             allow_list: if True, the other type can be a list type derived from the type.
         """
-        if self.typename == other.typename or self == AnyType or self == AutoType:
+        if self.typename == other.typename or other == AnyType or self == AutoType:
             return True
         if self.parent_type is not None and self.parent_type.downcast_compatible(other, allow_self_list=allow_self_list, allow_list=allow_list):
             return True

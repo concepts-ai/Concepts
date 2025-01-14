@@ -16,14 +16,14 @@ from concepts.dsl.expression import ObjectOrValueOutputExpression
 from concepts.dsl.tensor_value import TensorValue
 
 from concepts.dm.crow.behavior import CrowBehavior
-from concepts.dm.crow.behavior import CrowUntrackExpression, CrowBindExpression, CrowAssertExpression
+from concepts.dm.crow.behavior import CrowUntrackExpression, CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression
 from concepts.dm.crow.behavior import CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression
 from concepts.dm.crow.behavior import CrowBehaviorOrderingSuite
 from concepts.dm.crow.behavior_utils import format_behavior_statement
 from concepts.dm.crow.controller import CrowControllerApplicationExpression
 from concepts.dm.crow.planners.regression_planning import ScopedCrowExpression, SupportedCrowExpressionType
 
-__all__ = ['replace_variable_with_value', 'format_regression_statement', 'canonize_bounded_variables', 'split_simple_sequential']
+__all__ = ['replace_variable_with_value', 'format_regression_statement', 'canonicalize_bounded_variables', 'split_simple_sequential']
 
 
 def replace_variable_with_value(expr: ObjectOrValueOutputExpression, scope) -> ObjectOrValueOutputExpression:
@@ -62,8 +62,8 @@ def format_regression_statement(stmt: ScopedCrowExpression, scopes: Optional[dic
     return format_behavior_statement(inner_stmt, scopes=scopes, scope_id=scope_id) + '@' + str(scope_id)
 
 
-def canonize_bounded_variables(scopes, scope_id):
-    """Canonize the bounded variables in the scope. This function is used to resolve the scope references in the regression trace.
+def canonicalize_bounded_variables(scopes, scope_id):
+    """canonicalize the bounded variables in the scope. This function is used to resolve the scope references in the regression trace.
 
     Args:
         scopes: a set of scopes of the regression trace.
@@ -106,7 +106,7 @@ def split_simple_sequential(program: Sequence[Union[CrowBehavior, CrowBehaviorOr
     """
     simple_part = list()
     for i in reversed(range(len(program))):
-        if isinstance(program[i], (CrowAssertExpression, CrowControllerApplicationExpression, CrowBindExpression, CrowUntrackExpression, CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression)):
+        if isinstance(program[i], (CrowAssertExpression, CrowControllerApplicationExpression, CrowBindExpression, CrowMemQueryExpression, CrowUntrackExpression, CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression)):
             simple_part.append(ScopedCrowExpression(program[i], scope_id))
         else:
             break

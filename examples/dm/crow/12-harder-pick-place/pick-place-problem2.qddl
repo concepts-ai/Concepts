@@ -1,0 +1,64 @@
+(define
+  (problem simple-cube-in-box)
+  (:domain tabletop)
+  (:objects
+    world - qr::world-type
+    panda - panda-type
+    workspace - workspace-type
+    table - table-type
+    cube1 - cube-type
+    cube2 - cube-type
+    cube3 - cube-type
+    cube4 - cube-type
+  )
+  (:init
+    (weld world::world workspace (1, 0, 0, 0, 0, 0))
+    (weld world::world table (0, 0, -0.001, 0, 0, 0))
+    (weld world::world panda (0, 0, 0, 0, 0, 0))
+
+    ;; PANDA_JOINT_HOMES = np.array([-0.45105, -0.38886, 0.45533, -2.19163, 0.13169, 1.81720, 0.51563])
+    (joint-conf panda::panda_joint1 -0.45105)
+    (joint-conf panda::panda_joint2 -0.38886)
+    (joint-conf panda::panda_joint3 0.45533)
+    (joint-conf panda::panda_joint4 -2.19163)
+    (joint-conf panda::panda_joint5 0.13169)
+    (joint-conf panda::panda_joint6 1.81720)
+    (joint-conf panda::panda_joint7 0.51563)
+
+    (body-pose      cube1 (0.5, 0.3, 0.025, 0, 0, 0))
+    (urdf::prop     cube1 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube1 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube1 "MASS" 0.2)
+    (urdf::prop     cube1 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube1 "rgba" (1.0, 0.34, 0.34, 1.0))
+
+    (body-pose      cube2 (0.5, 0.3, 0.075, 0, 0, 0))
+    (urdf::prop     cube2 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube2 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube2 "MASS" 0.2)
+    (urdf::prop     cube2 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube2 "rgba" (0.34, 1.0, 0.34, 1.0))
+
+    (body-pose      cube3 (0.5, -0.3, 0.025, 0, 0, 0))
+    (urdf::prop     cube3 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube3 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube3 "MASS" 0.2)
+    (urdf::prop     cube3 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube3 "rgba" (0.34, 0.34, 1.0, 1.0))
+
+    (body-pose      cube4 (0.5, -0.3, 0.075, 0, 0, 0))
+    (urdf::prop     cube4 "DIM" (0.05, 0.05, 0.05))
+    (urdf::prop     cube4 "HALF" (0.025, 0.025, 0.025))
+    (urdf::prop     cube4 "MASS" 0.2)
+    (urdf::prop     cube4 "LATERAL_FRICTION" 1.0)
+    (urdf::load-arg cube4 "rgba" (0.34, 1.0, 0.34, 1.0))
+
+    (sim::camera-distance 1.5)
+    (sim::camera-yaw 90)
+    (sim::camera-pitch -25)
+    (sim::camera-look-at (0, 0, 0))
+  )
+  (:goal (and
+    (on cube1 cube3)
+  ))
+)

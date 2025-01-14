@@ -137,27 +137,30 @@ class PandaRobot(BulletArmRobotBase):
         self._cspace = None
         self._cfree_default_pspace = None
 
-        self.register_action('move_pose', self.move_pose)
-        self.register_action('move_home', self.move_home)
-        self.register_action('move_home_cfree', self.move_home_cfree)
+        self.register_action_controller('move_pose', self.move_pose)
+        self.register_action_controller('move_home', self.move_home)
+        self.register_action_controller('move_home_cfree', self.move_home_cfree)
 
-        self.register_action('grasp', self.grasp)
-        self.register_action('open_gripper_free', self.open_gripper_free)
-        self.register_action('close_gripper_free', self.close_gripper_free)
+        self.register_action_controller('grasp', self.grasp)
+        self.register_action_controller('open_gripper_free', self.open_gripper_free)
+        self.register_action_controller('close_gripper_free', self.close_gripper_free)
 
-        self.register_action('reach_two_stage', self.reach_two_stage)
-        self.register_action('planar_push', self.planar_push)
-        self.register_action('push_two_stage', self.push_two_stage)
-        self.register_action('pick_and_place', self.pick_and_place)
-        self.register_action('reach_two_stage', self.reach_two_stage, interface='franka')
-        self.register_action('planar_push', self.planar_push, interface='franka')
-        self.register_action('pick_and_place', self.pick_and_place, interface='franka')
+        self.register_action_controller('reach_two_stage', self.reach_two_stage)
+        self.register_action_controller('planar_push', self.planar_push)
+        self.register_action_controller('push_two_stage', self.push_two_stage)
+        self.register_action_controller('pick_and_place', self.pick_and_place)
+        self.register_action_controller('reach_two_stage', self.reach_two_stage, interface='franka')
+        self.register_action_controller('planar_push', self.planar_push, interface='franka')
+        self.register_action_controller('pick_and_place', self.pick_and_place, interface='franka')
 
         self.world.register_managed_interface('PandaRobot@' + str(self.panda), self)
         self.world.register_additional_state_saver(
             'PandaRobot@' + str(self.panda),
             lambda: PandaRobotMagicGripperStateSaver(self.client.client_id, self.world, 'PandaRobot@' + str(self.panda))
         )
+
+    def get_urdf_filename(self) -> str:
+        return self.client.canonicalize_asset_path(self._description_file)
 
     def set_finger_depth(self, depth: float):
         self._finger_depth = depth
@@ -212,11 +215,11 @@ class PandaRobot(BulletArmRobotBase):
         if ee_default_quat is not None:
             self.ee_default_quat = ee_default_quat
 
-    def attach_object(self, object_id: int, ee_to_object: Tuple[np.ndarray, np.ndarray], use_grasp_function: bool = True) -> None:
+    def attach_object(self, object_id: int, ee_to_object: Tuple[np.ndarray, np.ndarray], simulate_gripper: bool = True) -> None:
         super().attach_object(object_id, ee_to_object)
         # Next, we call the grasp() function to close the gripper. When the gripper hits the object, the object will be attached to the gripper.
         # In this step, it will automatically clear up the previous constraint we created and attach the object to the gripper with a new constraint.
-        if use_grasp_function:
+        if simulate_gripper:
             self.grasp()
         else:
             self.gripper_activated = True
@@ -300,7 +303,7 @@ class PandaRobot(BulletArmRobotBase):
         you should use :meth:`is_colliding_with_saved_state` instead.
         """
         if q is not None:
-            self.set_qpos_with_holding(q)
+            self.set_qpos_with_attached_objects(q)
         contacts = self.world.get_contact(self.panda, update=True)
 
         ignore_bodies = [self.panda]
@@ -597,12 +600,10 @@ class PandaRobot(BulletArmRobotBase):
                     self.detach_object()
         else:  # Turn gripper on.
             if self.use_magic_gripper:
-                if constraint_info is not None:
-                    if body_index is not None:
-                        self.create_gripper_constraint(body_index)
-                    else:
-                        assert constraint_info is not None
-                        self.create_gripper_constraint(constraint_info.child_body)
+                if body_index is not None:
+                    self.create_gripper_constraint(body_index)
+                elif constraint_info is not None:
+                    self.create_gripper_constraint(constraint_info.child_body)
 
         self.gripper_activated = activate
 

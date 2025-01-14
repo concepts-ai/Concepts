@@ -600,14 +600,14 @@ def has_optimistic_constant_expression(*expressions: Union[ValueOutputExpression
 
 def make_rule_applier(rule: RegressionRule, bounded_variables: Dict[str, ValueOutputExpression]) -> RegressionRuleApplier:
     """Make a rule applier from a regression rule and a set of bounded variables."""
-    canonized_bounded_variables = dict()
+    canonicalized_bounded_variables = dict()
     for k, v in bounded_variables.items():
         if isinstance(k, Variable):
             k = k.name
         if isinstance(v, ObjectConstant):
             v = v.name
-        canonized_bounded_variables[k] = v
-    arguments = [canonized_bounded_variables[x.name] for x in rule.arguments]
+        canonicalized_bounded_variables[k] = v
+    arguments = [canonicalized_bounded_variables[x.name] for x in rule.arguments]
     return RegressionRuleApplier(rule, arguments)
 
 

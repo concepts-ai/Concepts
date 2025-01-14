@@ -11,6 +11,7 @@
 import os
 from dataclasses import dataclass
 from typing import Any, Optional, Union, Iterator, Tuple, NamedTuple, List, Dict, Type
+
 from jacinle.utils.meta import UNSET
 
 from concepts.dsl.dsl_types import ObjectConstant
@@ -20,16 +21,18 @@ from concepts.dsl.expression import NullExpression, ValueOutputExpression, is_an
 from concepts.dsl.tensor_value import TensorValue
 from concepts.dsl.tensor_state import StateObjectReference, StateObjectList
 
+from concepts.dm.crow.crow_function import CrowFunctionEvaluationMode
 from concepts.dm.crow.crow_domain import CrowDomain, CrowProblem, CrowState
 from concepts.dm.crow.controller import CrowControllerApplier, CrowControllerApplicationExpression
 from concepts.dm.crow.behavior import CrowBehavior, CrowBehaviorCommit, CrowBehaviorEffectApplicationExpression
-from concepts.dm.crow.behavior import CrowAssertExpression, CrowBindExpression, CrowAchieveExpression, CrowBehaviorApplicationExpression, CrowUntrackExpression
+from concepts.dm.crow.behavior import CrowAssertExpression, CrowBindExpression, CrowMemQueryExpression, CrowAchieveExpression, CrowBehaviorApplicationExpression, CrowUntrackExpression
 from concepts.dm.crow.behavior import CrowRuntimeAssignmentExpression, CrowFeatureAssignmentExpression
 from concepts.dm.crow.behavior import CrowBehaviorOrderingSuite, CrowBehaviorCommit, CrowBehaviorConditionSuite, CrowBehaviorWhileLoopSuite, CrowBehaviorForeachLoopSuite
 from concepts.dm.crow.behavior_utils import format_behavior_statement
 from concepts.dm.crow.executors.crow_executor import CrowExecutor
 from concepts.dm.crow.executors.generator_executor import CrowGeneratorExecutor
 from concepts.dm.crow.interfaces.controller_interface import CrowSimulationControllerInterface
+from concepts.dm.crow.interfaces.perception_interface import CrowPerceptionInterface
 
 from concepts.dm.crow.planners.regression_dependency import RegressionTraceStatement
 
@@ -39,9 +42,10 @@ __all__ = [
 ]
 
 
+# TODO(Jiayuan Mao @ 2025/01/07): merge this using CrowBehaviorPrimitiveItem.
 SupportedCrowExpressionType = Union[
     CrowBehaviorOrderingSuite, CrowBehaviorForeachLoopSuite, CrowBehaviorWhileLoopSuite, CrowBehaviorConditionSuite,
-    CrowBindExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowRuntimeAssignmentExpression,
+    CrowBindExpression, CrowMemQueryExpression, CrowAssertExpression, CrowRuntimeAssignmentExpression, CrowRuntimeAssignmentExpression,
     CrowControllerApplicationExpression, CrowAchieveExpression, CrowUntrackExpression,
     CrowBehaviorApplicationExpression, CrowBehaviorEffectApplicationExpression,
     CrowBehaviorCommit
@@ -92,11 +96,18 @@ class CrowPlanningResult3(CrowPlanningResult):
     scope_constraint_evaluations: Dict[int, List[bool]]
     dependency_trace: Tuple['RegressionTraceStatement', ...]
     cost: float = 0.0
+    parent_search_node: Any = None
+
+    planner_root_node: Optional[Any] = None
+    planner_current_node: Optional[Any] = None
+
+    def get_state_index(self):
+        return self.state.simulation_state_index + len(self.controller_actions)
 
     @classmethod
     def make_empty(cls, state: CrowState) -> 'CrowPlanningResult3':
         return CrowPlanningResult3(
-            state, ConstraintSatisfactionProblem(), tuple(),
+            state, ConstraintSatisfactionProblem(state_timestamp=state.simulation_state_index), tuple(),
             scopes={0: dict()}, latest_scope=0,
             scope_constraints=dict(), scope_constraint_evaluations=dict(),
             dependency_trace=tuple()
@@ -116,7 +127,11 @@ class CrowPlanningResult3(CrowPlanningResult):
             latest_scope=latest_scope if latest_scope is not UNSET else self.latest_scope,
             scope_constraints=scope_constraints if scope_constraints is not UNSET else self.scope_constraints,
             scope_constraint_evaluations=scope_constraint_evaluations if scope_constraint_evaluations is not UNSET else self.scope_constraint_evaluations,
-            dependency_trace=dependency_trace if dependency_trace is not UNSET else self.dependency_trace
+            dependency_trace=dependency_trace if dependency_trace is not UNSET else self.dependency_trace,
+            cost=self.cost,
+            parent_search_node=self.parent_search_node,
+            planner_root_node=self.planner_root_node,
+            planner_current_node=self.planner_current_node
         )
 
     def clone_with_new_constraint(self, scope_id: int, constraint: ValueOutputExpression, evaluation: bool, do: bool) -> 'CrowPlanningResult3':
@@ -186,6 +201,7 @@ class CrowPlanningResult3(CrowPlanningResult):
 class CrowRegressionPlanner(object):
     def __init__(
         self, executor: CrowExecutor, state: CrowState, goal_expr: Union[str, ValueOutputExpression, None], *,
+        perception_interface: Optional[CrowPerceptionInterface] = None,
         simulation_interface: Optional[CrowSimulationControllerInterface] = None,
         # Group 1: goal serialization and refinements.
         is_goal_ordered: bool = True,
@@ -234,7 +250,10 @@ class CrowRegressionPlanner(object):
         if isinstance(self.goal_expr, str):
             self.goal_expr = executor.parse(self.goal_expr, state=state)
 
+        self.executor.set_simulation_interface(simulation_interface)
+        self.perception_interface = perception_interface
         self.simulation_interface = simulation_interface
+        # TODO(Jiayuan Mao @ 2025/01/2): handle this statement in a better way...
 
         self.is_goal_ordered = is_goal_ordered
         self.is_goal_serializable = is_goal_serializable
@@ -337,14 +356,14 @@ class CrowRegressionPlanner(object):
             program = CrowBehaviorOrderingSuite.make_sequential(
                 goal_set,
                 assert_expr,
-                CrowBehaviorCommit(csp=True, sketch=True, behavior=True),
+                CrowBehaviorCommit(csp=True, sketch=True, execution=True),
                 variable_scope_identifier=0
             )
         else:
             program = CrowBehaviorOrderingSuite.make_sequential(
                 CrowBehaviorOrderingSuite.make_promotable(goal_set),
                 assert_expr,
-                CrowBehaviorCommit(csp=True, sketch=True, behavior=True),
+                CrowBehaviorCommit(csp=True, sketch=True, execution=True),
                 variable_scope_identifier=0
             )
         return program, None
@@ -354,15 +373,15 @@ class CrowRegressionPlanner(object):
         return self._search_stat
 
     @property
-    def results(self) -> List[CrowPlanningResult]:
+    def results(self) -> Union[List[CrowPlanningResult3], List[CrowPlanningResult]]:
         return self._results
 
-    def set_results(self, results: List[CrowPlanningResult]) -> None:
+    def set_results(self, results: Union[List[CrowPlanningResult3], List[CrowPlanningResult]]) -> None:
         self._results = results
 
     def main(self) -> Tuple[List[Tuple[CrowControllerApplier, ...]], dict]:
         program, minimize = self._make_goal_program()
-        behavior_application = CrowBehaviorApplicationExpression(CrowBehavior('__goal__', [], None, program), [])
+        behavior_application = CrowBehaviorApplicationExpression(CrowBehavior('__goal__', [], None, program, always=True), [])
         program = CrowBehaviorOrderingSuite.make_sequential(behavior_application, variable_scope_identifier=0)
 
         candidate_plans = self.main_entry(program, minimize)
@@ -375,7 +394,8 @@ class CrowRegressionPlanner(object):
         self, expression: Union[ObjectOrValueOutputExpression, VariableAssignmentExpression], state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None,
         bounded_variables: Optional[Dict[str, Union[TensorValue, ObjectConstant]]] = None,
         clone_csp: bool = True,
-        force_tensor_value: bool = False
+        force_tensor_value: bool = False,
+        state_index: Optional[int] = None
     ) -> Tuple[Union[None, StateObjectReference, StateObjectList, TensorValue, OptimisticValue], Optional[ConstraintSatisfactionProblem]]:
         """Evaluate an expression and return the result.
 
@@ -395,11 +415,12 @@ class CrowRegressionPlanner(object):
         if bounded_variables is not None:
             bounded_variables = {k: v for k, v in bounded_variables.items() if not (k.startswith('__') and k.endswith('__'))}
 
-        if isinstance(expression, VariableAssignmentExpression):
-            self.executor.execute(expression, state=state, csp=csp, bounded_variables=bounded_variables)
-            return None, csp
+        with self.executor.update_effect_mode(CrowFunctionEvaluationMode.SIMULATION, state_index=state_index):
+            if isinstance(expression, VariableAssignmentExpression):
+                self.executor.execute(expression, state=state, csp=csp, bounded_variables=bounded_variables)
+                return None, csp
 
-        rv = self.executor.execute(expression, state=state, csp=csp, bounded_variables=bounded_variables)
+            rv = self.executor.execute(expression, state=state, csp=csp, bounded_variables=bounded_variables)
         if isinstance(rv, TensorValue):
             if force_tensor_value:
                 return rv, csp
@@ -414,6 +435,15 @@ class CrowRegressionPlanner(object):
         assert isinstance(rv, StateObjectReference) or isinstance(rv, StateObjectList) or isinstance(rv, ListValue)
         return rv, csp
 
+    def mem_query(
+        self, expression: ObjectOrValueOutputExpression, state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None,
+        bounded_variables: Optional[Dict[str, Union[TensorValue, ObjectConstant]]] = None,
+        state_index: Optional[int] = None
+    ) -> Tuple[CrowState, ConstraintSatisfactionProblem, Dict[str, Union[TensorValue, ObjectConstant]]]:
+        if self.perception_interface is None:
+            raise ValueError('No perception interface is provided.')
+        return self.perception_interface.mem_query(expression, state, csp, bounded_variables, state_index)
+
     def main_entry(self, state: CrowBehaviorOrderingSuite, minimize: Optional[ValueOutputExpression]) -> List[Tuple[CrowControllerApplier, ...]]:
         raise NotImplementedError()
 
@@ -421,7 +451,7 @@ class CrowRegressionPlanner(object):
 g_crow_regression_algorithm = None
 
 
-def get_crow_regression_algorithm_mappings() -> Type[CrowRegressionPlanner]:
+def get_crow_regression_algorithm_mappings() -> Dict[str, Type[CrowRegressionPlanner]]:
     from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_dfs_v1 import CrowRegressionPlannerDFSv1
     from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_bfs_v1 import CrowRegressionPlannerBFSv1
     from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_dfs_v2 import CrowRegressionPlannerDFSv2
@@ -468,7 +498,7 @@ def crow_regression(
     goal: Optional[Union[str, ValueOutputExpression]] = None,
     return_planner: bool = False, return_results: bool = False,
     **kwargs
-) -> Union[Tuple[list, dict], CrowRegressionPlanner, List[CrowPlanningResult]]:
+) -> Union[Tuple[list, dict], CrowRegressionPlanner, List[CrowPlanningResult], List[CrowPlanningResult3]]:
     if isinstance(domain_or_executor_or_problem, CrowExecutor):
         executor = domain_or_executor_or_problem
     elif isinstance(domain_or_executor_or_problem, CrowDomain):

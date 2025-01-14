@@ -114,7 +114,7 @@ class _IDDFSNode(NamedTuple):
 
 
 class CrowRegressionPlannerIDDFSv1(CrowRegressionPlanner):
-    def _post_init(self, min_search_depth:int = 5, max_search_depth:int = 20, always_commit_skeleton:bool = True, commit_skeleton_everything: bool = True, enable_state_hash:bool = True):
+    def _post_init(self, min_search_depth: int = 5, max_search_depth: int = 20, always_commit_skeleton: bool = True, commit_skeleton_everything: bool = True, enable_state_hash:bool = True):
         """Post initialization of the planner.
 
         Args:
@@ -312,20 +312,30 @@ class CrowRegressionPlannerIDDFSv1(CrowRegressionPlanner):
                 assert middle_program is None, 'Cannot commit a behavior within a promotable program.'
                 # if stmt.execution:
                 #     raise NotImplementedError('Not implemented yet.')
-                if stmt.sketch:
+
+                # NB(Jiayuan Mao @ 2025/01/01): somehow stmt.sketch works very poorly with optimistic variables. So we need to handle the special case.
+                # Basically, when the goal is an optimistic variable, the first sketch always assumes it's optimistically true, which fails
+                # most of the time.
+                if stmt.sketch and not stmt.csp:
                     # Select only the first solution.
                     results_iterator = itertools.islice(self.dfs(new_state, depth), 1)
                 else:
                     results_iterator = self.dfs(new_state, depth)
                 if stmt.csp:
                     for result in results_iterator:
-                        yield from self._solve_csp(result)
+                        found_result = False
+                        for csp_result in self._solve_csp(result):
+                            found_result = True
+                            yield csp_result
+
+                        if found_result and stmt.sketch:
+                            break
                 else:
                     yield from results_iterator
             else:
                 nr_yielded = 0
                 for x in self.dfs_inner(new_state, stmt, middle_program, scope_id, depth):
-                    # jacinle.lf_indent_print('Yielding:', x)
+                    # jacinle.lf_indent_print('Yielding:', x, 'nr_yielded:', nr_yielded, 'always_commit_skeleton:', self.always_commit_skeleton)
                     yield x
                     nr_yielded += 1
                     if self.always_commit_skeleton:
@@ -388,6 +398,7 @@ class CrowRegressionPlannerIDDFSv1(CrowRegressionPlanner):
                             yield result.clone_with_new_constraint(scope_id, stmt.goal, True, do=not stmt.once).clone(
                                 dependency_trace=result.dependency_trace + (RegressionTraceStatement(CrowAssertExpression(stmt.goal, once=stmt.once), scope_id, scope=result.scopes[scope_id], additional_info='skip', derived_from=stmt), ) if self.include_dependency_trace else tuple()
                             )
+
             if not found_result or not self.always_commit_skeleton:
                 if self.verbose:
                     jacinle.lf_indent_print('=' * 80)
@@ -811,7 +822,8 @@ class CrowRegressionPlannerIDDFSv1(CrowRegressionPlanner):
             argument_values = [self.evaluate(x, state=result.state, csp=new_csp, bounded_variables=result.scopes[scope_id], clone_csp=False, force_tensor_value=True)[0] for x in stmt.arguments]
             if self.verbose:
                 jacinle.lf_indent_print('Processing controller application stmt:', CrowControllerApplier(stmt.controller, argument_values))
-            result = result.clone(controller_actions=result.controller_actions + (CrowControllerApplier(stmt.controller, argument_values),))
+            new_csp.increment_state_timestamp()
+            result = result.clone(csp=new_csp, controller_actions=result.controller_actions + (CrowControllerApplier(stmt.controller, argument_values),))
             if stmt.controller.effect_body is not None:
                 yield from self._handle_behavior_effect_application(result, stmt, None, argument_values)
             else:
@@ -835,11 +847,11 @@ class CrowRegressionPlannerIDDFSv1(CrowRegressionPlanner):
         new_csp = result.csp.clone()
 
         if isinstance(effect, CrowBehaviorEffectApplicationExpression):
-            new_state = execute_behavior_effect_body(self.executor, effect.behavior, state=result.state, csp=new_csp, scope=result.scopes[scope_id], action_index=len(result.controller_actions) - 1)
+            new_state = execute_behavior_effect_body(self.executor, effect.behavior, state=result.state, csp=new_csp, scope=result.scopes[scope_id], state_index=len(result.controller_actions))
             effect_applier = CrowEffectApplier(effect.behavior.effect_body.statements, result.scopes[scope_id])
         elif isinstance(effect, CrowControllerApplicationExpression):
             scope = {x.name: y for x, y in zip(effect.controller.arguments, argument_values)}
-            new_state = execute_behavior_effect_body(self.executor, effect.controller, state=result.state, csp=new_csp, scope=scope, action_index=len(result.controller_actions) - 1)
+            new_state = execute_behavior_effect_body(self.executor, effect.controller, state=result.state, csp=new_csp, scope=scope, state_index=len(result.controller_actions))
             effect_applier = CrowEffectApplier(effect.controller.effect_body.statements, scope)
         else:
             raise ValueError(f'Invalid effect type: {effect}.')

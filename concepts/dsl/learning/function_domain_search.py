@@ -26,7 +26,7 @@ from concepts.dsl.executors.function_domain_executor import FunctionDomainExecut
 __all__ = [
     'FunctionDomainExpressionSearchResult', 'FunctionDomainExpressionEnumerativeSearcher', 'gen_merge_functions',
     'gen_expression_search_result_from_expressions',
-    'FunctionArgumentStat', 'stat_function', 'canonize_function_parameters',
+    'FunctionArgumentStat', 'stat_function', 'canonicalize_function_parameters',
     'learn_expression_from_examples'
 ]
 
@@ -202,7 +202,7 @@ class FunctionDomainExpressionEnumerativeSearcher(object):
                             stat.nr_variable_arguments <= max_variable_arguments and \
                             stat.nr_function_arguments <= max_function_arguments:
                         expressions.append(FunctionDomainExpressionSearchResult(
-                            canonize_function_parameters(f, ignore_permutation=True),
+                            canonicalize_function_parameters(f, ignore_permutation=True),
                             depth, stat.nr_constant_arguments, stat.nr_variable_arguments, stat.nr_function_arguments
                         ))
                 else:
@@ -409,14 +409,14 @@ def stat_function(f: Function) -> FunctionArgumentStat:
     )
 
 
-def canonize_function_parameters(
+def canonicalize_function_parameters(
     f: Union[ConstantExpression, FunctionApplicationExpression, Function],
     ignore_permutation: bool = False
 ) -> Union[ConstantExpression, FunctionApplicationExpression, Function]:
     """Return a new function object with argument reordered: functions, variables, constants.
 
     Args:
-        f: the function to be canonized. If the function is a function application expression or a constant expression,
+        f: the function to be canonicalized. If the function is a function application expression or a constant expression,
             this function returns the same object.
 
     Returns:

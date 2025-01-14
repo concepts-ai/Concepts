@@ -8,7 +8,7 @@
 
 set -e
 
-wget -O assets.tar https://concepts.jiayuanm.com/assets.tar
+wget -O assets.tar https://concepts-ai.com/assets.tar
 
 # extract the assets and do overwrite
 tar -xvf assets.tar

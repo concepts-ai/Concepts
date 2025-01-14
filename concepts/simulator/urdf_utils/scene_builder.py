@@ -97,7 +97,7 @@ class SceneBuilder(object):
         mesh_obj_filename = osp.join(self.output_dir, f'{identifier}.obj')
 
         if pos is None:
-            mesh, pos = canonize_mesh_center(mesh)
+            mesh, pos = canonicalize_mesh_center(mesh)
         if quat_xyzw is None:
             quat_xyzw = [0, 0, 0, 1]
 
@@ -158,8 +158,8 @@ class SceneBuilder(object):
         return builder
 
 
-def canonize_mesh_center(mesh_: o3d.geometry.TriangleMesh) -> tuple[o3d.geometry.TriangleMesh, np.ndarray]:
-    """Canonize the mesh center. Note that this function modifies the mesh in place.
+def canonicalize_mesh_center(mesh_: o3d.geometry.TriangleMesh) -> tuple[o3d.geometry.TriangleMesh, np.ndarray]:
+    """canonicalize the mesh center. Note that this function modifies the mesh in place.
 
     Args:
         mesh_: an open3d triangle mesh.

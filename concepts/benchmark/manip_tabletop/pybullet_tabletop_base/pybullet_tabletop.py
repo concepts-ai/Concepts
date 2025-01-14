@@ -32,8 +32,6 @@ class TableTopEnv(BulletEnvBase):
 
     def __init__(self, client: Optional[BulletClient] = None, is_gui: bool = True, seed: int = 1234):
         super().__init__(client, seed=seed, is_gui=is_gui)
-        self.robot = None
-        self.robots = list()
         self.saver = WorldSaver(self.world, save=False)
         self.metainfo = dict()
 
@@ -105,6 +103,42 @@ class TableTopEnv(BulletEnvBase):
             body_name=name,
             static=True,
         )
+
+    def add_table(self, x_range: Tuple[float, float], y_range: Tuple[float, float], surface_z: float, name: str = 'table') -> int:
+        box_size = (x_range[1] - x_range[0], y_range[1] - y_range[0], 1)
+        TABLE_URDF_STRING = f"""
+<?xml version="1.0" ?>
+<robot name="plane">
+  <link name="planeLink">
+    <contact>
+      <lateral_friction value="1"/>
+    </contact>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <mass value=".0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 -0.5"/>
+      <geometry>
+        <box size="{box_size[0]} {box_size[1]} {box_size[2]}"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 -0.5"/>
+      <geometry>
+        <box size="{box_size[0]} {box_size[1]} {box_size[2]}"/>
+      </geometry>
+      <material name="LightGrey">
+        <color rgba="0.9 0.9 0.9 1"/>
+      </material>
+    </visual>
+  </link>
+</robot>
+"""
+        x_center = (x_range[0] + x_range[1]) / 2
+        y_center = (y_range[0] + y_range[1]) / 2
+        return self.client.load_urdf_string(TABLE_URDF_STRING, (x_center, y_center, surface_z), static=True, body_name=name)
 
     def add_robot(self, robot: str = 'panda', pos: Optional[Vec3f] = None, quat: Optional[Vec4f] = None, name: Optional[str] = None, robot_kwargs: Optional[dict] = None) -> int:
         """Add a robot to the environment.

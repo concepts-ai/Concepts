@@ -62,6 +62,10 @@ def get_robot_config_by_index(robot_index):
     raise ValueError(f'Robot with index {robot_index} not found')
 
 
+def get_robot_config_content_by_index(robot_index):
+    return YamlConfig(osp.join(config_root, get_robot_config_by_index(robot_index).config_file)).as_easydict()
+
+
 def get_camera_config_by_name(camera_name):
     config = get_global_config().cameras
     for camera in config:

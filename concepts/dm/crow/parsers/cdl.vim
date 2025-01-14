@@ -12,7 +12,7 @@ endif
 syn case match
 
 " Keywords
-syn keyword CDLKeyword #!pragma achieve achieve_hold achieve_once action alternative assert assert_hold assert_once behavior bind body certifies commit controller critical def do domain eff else exists expr feature findall for forall foreach generator goal heuristic include if in init let local minimize objects out pass pragma pre preamble problem promotable return sequential typedef undirected_generator unordered untrack vector where while
+syn keyword CDLKeyword #!pragma achieve achieve_hold achieve_once action alternative assert assert_hold assert_once behavior bind body certifies commit controller critical def do domain eff else exists expr feature findall for forall foreach generator goal heuristic include if in init let local mem_query minimize objects out pass pragma pre preamble problem promotable return sequential typedef undirected_generator unordered untrack vector where while
 
 syn keyword CDLSpecialKeyword False None True and bool float32 int64 not object or pyobject string
 

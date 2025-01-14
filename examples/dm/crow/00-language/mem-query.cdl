@@ -1,0 +1,24 @@
+problem "mem-query-demo"
+domain "__empty__"
+
+#!pragma planner_algo="priority_tree_v1"
+
+typedef Object: object
+typedef ObjectList: Object[]
+
+feature is_good(x: Object) -> bool
+
+controller print(x: Object)
+
+objects:
+  A, B, C: Object
+
+init:
+  is_good[A] = True
+
+behavior __goal__():
+  body:
+    mem_query findall x: Object: is_good(x)
+    let xl = findall x: Object: is_good(x)
+    foreach x in xl:
+      print(x)

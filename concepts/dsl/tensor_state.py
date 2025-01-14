@@ -491,4 +491,3 @@ def concat_states(*args: TensorState) -> TensorState:
     kwargs['features'] = features
     kwargs['batch_dims'] = args[0].batch_dims + 1
     return type(state)(**kwargs)
-

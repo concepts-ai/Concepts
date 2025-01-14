@@ -22,12 +22,13 @@ from skimage.feature import peak_local_max
 
 
 def patch_match(
-    source_feature: torch.Tensor,
-    target_features: torch.Tensor,  # N, C, H, W
-    source_xy: Union[np.ndarray, List, tuple],
-    patch_size=15,
-    return_match_scores=False,
-    collect_memory: Optional[bool] = None
+        source_feature: torch.Tensor,
+        target_features: torch.Tensor,  # N, C, H, W
+        source_xy: Union[np.ndarray, List, tuple],
+        patch_size=15,
+        return_match_scores=False,
+        collect_memory: Optional[bool] = None,
+        max_peaks=5,
 ) -> Union[
     tuple[List, np.ndarray, List[np.ndarray]],
     tuple[List, np.ndarray, List[np.ndarray], List[float]]
@@ -51,7 +52,7 @@ def patch_match(
         0, :,
         y - half_patch_size:y + half_patch_size + 1,
         x - half_patch_size:x + half_patch_size + 1
-    ]  # 1, C, K, K
+    ]  # C, K, K
 
     src_rotated_patches = []
 
@@ -64,7 +65,7 @@ def patch_match(
     del src_patch
     maybe_collect_memory()
 
-    src_rotated_patches = [F.normalize(patch, dim=1) for patch in src_rotated_patches]  # 1, C, K, K
+    src_rotated_patches = [F.normalize(patch, dim=0) for patch in src_rotated_patches]  # 1, C, K, K
 
     best_match_scores = []
     best_match_yxs = []
@@ -73,7 +74,7 @@ def patch_match(
     maybe_collect_memory()
 
     for i in range(num_targets):
-        trg_ft = F.normalize(target_features[i], dim=1).unsqueeze(0)  # 1, C, H, W
+        trg_ft = F.normalize(target_features[i], dim=0).unsqueeze(0)  # 1, C, H, W
 
         score_maps = []
         K = K
@@ -91,7 +92,7 @@ def patch_match(
             maybe_collect_memory()
         score_map = np.concatenate(score_maps, axis=0).max(axis=0)  # HxW
 
-        local_peaks = find_local_peaks(score_map)
+        local_peaks = find_local_peaks(score_map, max_peaks=max_peaks)
 
         # max_yx = np.unravel_index(score_map.argmax(), score_map.shape)
         # best_match_scores.append(score_map.max())

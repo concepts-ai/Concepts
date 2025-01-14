@@ -23,7 +23,7 @@ from jacinle.utils.context import EmptyContext
 from concepts.dsl.dsl_types import BOOL, ValueType, NamedTensorValueType, TensorValueTypeBase, PyObjValueType
 from concepts.dsl.dsl_functions import Function
 from concepts.dsl.tensor_value import TensorValue
-from concepts.dsl.constraint import Constraint, GroupConstraint, ConstraintSatisfactionProblem, OptimisticValue, OptimisticValueRecord, Assignment, AssignmentType, AssignmentDict, SimulationFluentConstraintFunction, ground_assignment_value
+from concepts.dsl.constraint import Constraint, GroupConstraint, ConstraintSatisfactionProblem, OptimisticValue, OptimisticValueRecord, Assignment, AssignmentType, AssignmentDict, SimulationFluentConstraintFunction
 from concepts.dsl.expression import VariableExpression, ValueOutputExpression, BoolOpType, QuantificationOpType, BoolExpression, PredicateEqualExpression, ValueCompareExpression, CompareOpType, FunctionApplicationExpression
 from concepts.dsl.expression_utils import iter_exprs
 
@@ -94,7 +94,7 @@ def _ground_assignment_value_partial(assignments: Dict[int, Assignment], dtype: 
     return OptimisticValue(dtype, identifier)
 
 
-def dpll_apply_assignments(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment]) -> ConstraintList:
+def dpll_apply_assignments(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment], simulation_state_index: Optional[int] = None) -> ConstraintList:
     """Apply the assignments to the constraints. Essentially, it replaces all variables that have been determined in the assignment dictionary with the value.
 
     This function will also check all the constraints to make sure that the assignments are valid.
@@ -142,15 +142,26 @@ def dpll_apply_assignments(executor: CrowExecutor, constraints: ConstraintList, 
         if _determined(nc.rv) and _determined(*nc.arguments) and not isinstance(nc.function, SimulationFluentConstraintFunction):
             if isinstance(nc.function, CrowFunction) and nc.function.is_generator_placeholder:
                 raise CSPNotSolvable(f'Constraint {c} is not satisfied: the generator placeholder is not resolved.')
-            if executor.check_constraint(nc):
-                continue
+            if isinstance(nc.function, CrowFunction) and nc.function.is_simulation_dependent:
+                if simulation_state_index is not None and nc.timestamp == simulation_state_index:
+                    # print(f'>>> Matched! {nc}: timestamp={nc.timestamp}, simulation_state_index={simulation_state_index}')
+                    run_check = True
+                else:
+                    run_check = False
             else:
-                raise CSPNotSolvable(f'Constraint {c} is not satisfied.')
+                run_check = True
+            if run_check:
+                if executor.check_constraint(nc):
+                    continue
+                else:
+                    raise CSPNotSolvable(f'Constraint {c} is not satisfied.')
+            else:
+                pass  # adding the nc back to the new_constraints
         new_constraints.append(nc)
     return new_constraints
 
 
-def dpll_filter_deterministic_equal(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment]) -> Tuple[bool, ConstraintList]:
+def dpll_filter_deterministic_equal(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment], simulation_state_index: Optional[int] = None) -> Tuple[bool, ConstraintList]:
     """Filter the constraints to remove the ones that are determined to be equal.
 
     Args:
@@ -207,11 +218,11 @@ def dpll_filter_deterministic_equal(executor: CrowExecutor, constraints: Constra
                     progress = True
 
     if progress:
-        return progress, dpll_apply_assignments(executor, constraints, assignments)
+        return progress, dpll_apply_assignments(executor, constraints, assignments, simulation_state_index)
     return progress, constraints
 
 
-def dpll_filter_unused_rhs(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment], index2record: Dict[int, OptimisticValueRecord]) -> ConstraintList:
+def dpll_filter_unused_rhs(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment], index2record: Dict[int, OptimisticValueRecord], simulation_state_index: Optional[int] = None) -> Tuple[bool, ConstraintList]:
     """Filter out constraints that only appear once in the RHS of the constraints. In this case, the variable can be ignored and the related constraints can be removed.
 
     Args:
@@ -236,13 +247,17 @@ def dpll_filter_unused_rhs(executor: CrowExecutor, constraints: ConstraintList, 
                 used[x.identifier] += 100  # as long as a variable has appeared in the lhs of a constraint, it is used.
         if isinstance(c.rv, OptimisticValue):
             used[c.rv.identifier] += 1  # if the variable has only appeared in the rhs of a constraint for once, it is not used.
+
+    if len(used) == 0:
+        return False, constraints
+
     for k, v in used.items():
         if v == 1:
             assignments[k] = Assignment(AssignmentType.IGNORE, None)
-    return dpll_apply_assignments(executor, constraints, assignments)
+    return True, dpll_apply_assignments(executor, constraints, assignments, simulation_state_index)
 
 
-def dpll_filter_deterministic_clauses(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment]) -> Tuple[bool, ConstraintList]:
+def dpll_filter_deterministic_clauses(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment], simulation_state_index: Optional[int] = None) -> Tuple[bool, ConstraintList]:
     """Filter out Boolean constraints that have been determined. For example, AND(x, y, z) == true, then
         x == true, y == true, z == true. This function will remove the AND(x, y, z) constraint.
 
@@ -345,11 +360,11 @@ def dpll_filter_deterministic_clauses(executor: CrowExecutor, constraints: Const
             progress = True
             assignments[c.rv.identifier] = Assignment(AssignmentType.VALUE, c.arguments[0].item() == c.arguments[1].item())
     if progress:
-        return progress, dpll_apply_assignments(executor, constraints, assignments)
+        return progress, dpll_apply_assignments(executor, constraints, assignments, simulation_state_index)
     return progress, constraints
 
 
-def dpll_filter_duplicated_constraints(executor: CrowExecutor, constraints: ConstraintList) -> Tuple[bool, ConstraintList]:
+def dpll_filter_duplicated_constraints(executor: CrowExecutor, constraints: ConstraintList, simulation_state_index: Optional[int] = None) -> Tuple[bool, ConstraintList]:
     """Filter out duplicated constraints. For example, if we have x == 1 and x == 1, then we can remove one of them.
 
     Args:
@@ -372,7 +387,7 @@ def dpll_filter_duplicated_constraints(executor: CrowExecutor, constraints: Cons
         else:
             string_set.add(cstr)
     if progress:
-        return progress, dpll_apply_assignments(executor, constraints, {})
+        return progress, dpll_apply_assignments(executor, constraints, {}, simulation_state_index)
     return progress, constraints
 
 
@@ -398,7 +413,7 @@ def dpll_find_bool_variable(executor: CrowExecutor, constraints: ConstraintList,
     return max(count, key=count.get)
 
 
-def dpll_find_grounded_function_application(executor: CrowExecutor, constraints: ConstraintList) -> Optional[Constraint]:
+def dpll_find_grounded_function_application(executor: CrowExecutor, simulation_interface: CrowSimulationControllerInterface, constraints: ConstraintList) -> Optional[Constraint]:
     """Find a function application whose arguments are all determined.
 
     Args:
@@ -411,8 +426,13 @@ def dpll_find_grounded_function_application(executor: CrowExecutor, constraints:
     for c in constraints:
         if c.is_group_constraint:
             continue
-        if _determined(*c.arguments) and isinstance(c.function, Function):
-            return c
+        if _determined(*c.arguments):
+            if isinstance(c.function, Function):
+                if isinstance(c.function, CrowFunction) and c.function.is_simulation_dependent:
+                    if c.timestamp == simulation_interface.get_action_counter():
+                        return c
+                else:
+                    return c
 
     return None
 
@@ -491,10 +511,10 @@ def _parse_value_compare_expr_into_predicate_equal_expr(expr) -> Optional[Predic
     return expr
 
 
-GeneratorMatchingReturnType = Optional[List[Tuple[Union[Constraint, GroupConstraint], CrowDirectedGenerator, Optional[GeneratorMatchingInputType], Optional[GeneratorMatchingOutputType]]]]
+GeneratorMatchingReturnType = List[Tuple[Union[Constraint, GroupConstraint], CrowDirectedGenerator, Optional[GeneratorMatchingInputType], Optional[GeneratorMatchingOutputType]]]
 
 
-def _find_gen_variable_group(executor: CrowExecutor, constraints: ConstraintList) -> GeneratorMatchingReturnType:
+def _find_gen_variable_group(executor: CrowExecutor, constraints: ConstraintList) -> Optional[GeneratorMatchingReturnType]:
     all_generators = list()
     for c in constraints:
         if c.is_group_constraint:
@@ -506,12 +526,18 @@ def _find_gen_variable_group(executor: CrowExecutor, constraints: ConstraintList
     return all_generators
 
 
-def _find_gen_variable(executor: CrowExecutor, constraints: ConstraintList) -> GeneratorMatchingReturnType:
+def _find_gen_variable(executor: CrowExecutor, constraints: ConstraintList, state_index: Optional[int] = None) -> Optional[GeneratorMatchingReturnType]:
     # Step 1: find all applicable generators.
     all_generators = list()
     for c in constraints:
         if c.is_group_constraint:
             continue
+        if isinstance(c.function, CrowFunction) and c.function.is_simulation_dependent:
+            if state_index is not None and c.timestamp == state_index:
+                pass
+            else:
+                continue
+
         for g in executor.domain.generators.values():
             i, o = _match_generator(c, g)
             # jacinle.log_function.print('matching', c, g, i, o)
@@ -536,7 +562,7 @@ def _find_gen_variable(executor: CrowExecutor, constraints: ConstraintList) -> G
     return None
 
 
-def _find_gen_variable_advanced(executor: CrowExecutor, constraints: ConstraintList) -> GeneratorMatchingReturnType:
+def _find_gen_variable_advanced(executor: CrowExecutor, constraints: ConstraintList) -> Optional[GeneratorMatchingReturnType]:
     def match_io(list1, list2):
         for x, y in zip(list1, list2):
             if x is None or y is None:
@@ -646,17 +672,19 @@ def _find_fancy_gen_variable(
     return None
 
 
-def dpll_find_gen_variable_combined(executor: CrowExecutor, csp: ConstraintSatisfactionProblem, constraints: ConstraintList, assignments: AssignmentDict) -> GeneratorMatchingReturnType:
+def dpll_find_gen_variable_combined(executor: CrowExecutor, simulation_interface: CrowSimulationControllerInterface, csp: ConstraintSatisfactionProblem, constraints: ConstraintList, assignments: AssignmentDict) -> GeneratorMatchingReturnType:
     """Combine the generator matching in the following order:
 
     1. Use :func:`_find_gen_variable` to find the generator with the highest priority.
     2. Use :func:`_find_gen_variable_advanced` to find the generator with the highest priority, using star-matching.
     3. Use :func:`_find_typegen_variable` to find the generator with the highest priority, using type-matching.
     """
+    state_index = simulation_interface.get_action_counter() if simulation_interface is not None else None
+
     rv = _find_gen_variable_group(executor, constraints)
     if rv is not None:
         return rv
-    rv = _find_gen_variable(executor, constraints)
+    rv = _find_gen_variable(executor, constraints, state_index=state_index)
     if rv is not None:
         return rv
 
@@ -679,7 +707,7 @@ def dpll_find_gen_variable_combined(executor: CrowExecutor, csp: ConstraintSatis
     return None
 
 
-def dpll_filter_unused_simulation_rhs(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment]) -> ConstraintList:
+def dpll_filter_unused_simulation_rhs(executor: CrowExecutor, constraints: ConstraintList, assignments: Dict[int, Assignment], simulation_state_index: Optional[int] = None) -> Tuple[bool, ConstraintList]:
     """Filter out simulation constraints that only appear once in the RHS of the constraints. In this case, the variable can be ignored and the related constraints can be removed.
 
     Args:
@@ -699,10 +727,15 @@ def dpll_filter_unused_simulation_rhs(executor: CrowExecutor, constraints: Const
                 used[x.identifier] += 100  # as long as a variable has appeared in the lhs of a constraint, it is used.
         if isinstance(c.rv, OptimisticValue) and isinstance(c.function, SimulationFluentConstraintFunction):
             used[c.rv.identifier] += 1  # if the variable has only appeared in the rhs of a constraint for once, it is not used.
+
+    if len(used) == 0:
+        return False, constraints
+
     for k, v in used.items():
         if v == 1:
             assignments[k] = Assignment(AssignmentType.IGNORE, None)
-    return dpll_apply_assignments(executor, constraints, assignments)
+
+    return True, dpll_apply_assignments(executor, constraints, assignments, simulation_state_index)
 
 
 def dpll_apply_assignments_with_simulation(
@@ -711,14 +744,14 @@ def dpll_apply_assignments_with_simulation(
     simulation_interface: Optional[CrowSimulationControllerInterface], actions: Sequence[CrowControllerApplier],
     verbose: bool = False
 ) -> Tuple[ConstraintList, AssignmentDict]:
-    new_constraints = dpll_apply_assignments(executor, constraints, assignments)
+    simulation_state_index = simulation_interface.get_action_counter() if simulation_interface is not None else None
+    new_constraints = dpll_apply_assignments(executor, constraints, assignments, simulation_state_index)
     new_assignments = None
 
     if simulation_interface is None:
         return new_constraints, assignments
 
     while True:
-        # TODO(Jiayuan Mao @ 2024/04/22): better formulate the simulation constraints.
         next_action_index = simulation_interface.get_action_counter()
         if next_action_index < len(actions):
             action = actions[next_action_index]
@@ -744,38 +777,48 @@ def dpll_apply_assignments_with_simulation(
             if new_assignments is None:
                 new_assignments = assignments.copy()
 
-            # Update the assignments.
-            for i, c in enumerate(new_constraints):
-                if isinstance(c.function, SimulationFluentConstraintFunction):
-                    function: SimulationFluentConstraintFunction = c.function
-                    if function.action_index == next_action_index:
-                        if isinstance(c.rv, TensorValue):
-                            if c.rv.dtype != BOOL:
-                                raise NotImplementedError('Only bool is supported for simulation constraints.')
-
-                            # print('Simulation constraint', c)
-                            # print(state.features[function.predicate.name])
-                            # print('Desired value =', c.rv.value, 'Actual value =', state.features[function.predicate.name][function.arguments].item())
-                            # import pybullet
-                            # pybullet.stepSimulation()
-                            # import ipdb; ipdb.set_trace()
-
-                            if state.features[function.predicate.name][function.arguments].item() != c.rv.item():
-                                raise CSPNotSolvable()
-                            else:
-                                new_constraints[i] = None
-                        else:
-                            new_assignments[c.rv.identifier] = Assignment(
-                                AssignmentType.VALUE,
-                                state.features[function.predicate.name][function.arguments]
-                            )
-                            new_constraints[i] = None
-
-            new_constraints = dpll_apply_assignments(executor, new_constraints, new_assignments)
+            resolve_simulation_fluent_constraints_inplace(simulation_interface, new_constraints, new_assignments)
+            new_constraints = dpll_apply_assignments(executor, new_constraints, new_assignments, simulation_state_index=next_action_index + 1)
         else:
             break
 
     return new_constraints, new_assignments if new_assignments is not None else assignments
+
+
+def resolve_simulation_fluent_constraints_inplace(
+    simulation_interface: CrowSimulationControllerInterface, constraints_: ConstraintList, assignments_: Dict[int, Assignment],
+) -> Tuple[ConstraintList, AssignmentDict]:
+    state = simulation_interface.get_crow_state()
+    state_index = simulation_interface.get_action_counter()
+
+    # Update the assignments.
+    for i, c in enumerate(constraints_):
+        if isinstance(c.function, SimulationFluentConstraintFunction):
+            function: SimulationFluentConstraintFunction = c.function
+            if function.state_index == state_index:  # After the "next_action_index" has been executed.
+                if isinstance(c.rv, TensorValue):
+                    if c.rv.dtype != BOOL:
+                        raise NotImplementedError('Only bool is supported for simulation constraints.')
+
+                    # print('Simulation constraint', c)
+                    # print(state.features[function.predicate.name])
+                    # print('Desired value =', c.rv.value, 'Actual value =', state.features[function.predicate.name][function.arguments].item())
+                    # import pybullet
+                    # pybullet.stepSimulation()
+                    # import ipdb; ipdb.set_trace()
+
+                    if state.features[function.predicate.name][function.arguments].item() != c.rv.item():
+                        raise CSPNotSolvable()
+                    else:
+                        constraints_[i] = None
+                else:
+                    assignments_[c.rv.identifier] = Assignment(
+                        AssignmentType.VALUE,
+                        state.features[function.predicate.name][function.arguments]
+                    )
+                    constraints_[i] = None
+
+    return constraints_, assignments_
 
 
 def dpll_solve(
@@ -783,6 +826,7 @@ def dpll_solve(
     generator_manager: Optional[CrowGeneratorExecutor] = None,
     simulation_interface: Optional[CrowSimulationControllerInterface] = None,
     actions: Optional[Sequence[CrowControllerApplier]] = None,
+    simulation_state: Optional[int] = None, simulation_state_index: Optional[int] = None,
     max_generator_trials: int = 3,
     enable_ignore: bool = False, solvable_only: bool = False,
     verbose: bool = False
@@ -826,21 +870,27 @@ def dpll_solve(
         if len(constraints) == 0:
             return assignments
 
+        simulation_state_index = simulation_interface.get_action_counter() if simulation_interface is not None else None
+
         progress = True
         while progress:
-            progress, constraints = dpll_filter_deterministic_equal(executor, constraints, assignments)
+            progress, constraints = dpll_filter_deterministic_equal(executor, constraints, assignments, simulation_state_index)
         if enable_ignore:
-            constraints = dpll_filter_unused_rhs(executor, constraints, assignments, csp.index2record)
+            _, constraints = dpll_filter_unused_rhs(executor, constraints, assignments, csp.index2record, simulation_state_index)
         else:
             # NB(Jiayuan Mao @ 2023/03/11): for simulation constraints, we can remove them if they are not used in any other constraints.
             # TODO(Jiayuan Mao @ 2023/03/15): actually, I just noticed that this is a "bug" in the implementation of `_find_bool_variable`.
             # Basically, if the variable is a simulation variable and it only appears in the RHS of a constraint, then it will be ignored.
             # The current handling will work, but probably I need to think about a better way to handle this.
-            constraints = dpll_filter_unused_simulation_rhs(executor, constraints, assignments)
+
+            # TODO(Jiayuan Mao @ 2025/01/03): I forgot what was the bug in _find_bool_variable. But apparently this is causing
+            # another bug in csp_ground_state. So here I comment out the following line.
+            # _, constraints = dpll_filter_unused_simulation_rhs(executor, constraints, assignments, simulation_state_index)
+            pass
 
         progress = True
         while progress:
-            progress, constraints = dpll_filter_deterministic_clauses(executor, constraints, assignments)
+            progress, constraints = dpll_filter_deterministic_clauses(executor, constraints, assignments, simulation_state_index)
 
         if verbose:
             jacinle.log_function.print('Remaining constraints:', len(constraints))
@@ -870,7 +920,7 @@ def dpll_solve(
                     pass
 
             raise CSPNotSolvable()
-        elif (next_fapp := dpll_find_grounded_function_application(executor, constraints)) is not None:
+        elif (next_fapp := dpll_find_grounded_function_application(executor, simulation_interface, constraints)) is not None:
             function = next_fapp.function
             arguments = next_fapp.arguments
             target = next_fapp.rv
@@ -890,7 +940,7 @@ def dpll_solve(
                     pass
 
             raise CSPNotSolvable()
-        elif (next_gen_vars := dpll_find_gen_variable_combined(executor, csp, constraints, assignments)) is not None:
+        elif (next_gen_vars := dpll_find_gen_variable_combined(executor, simulation_interface, csp, constraints, assignments)) is not None:
             if len(next_gen_vars) >= 1:
                 if verbose:
                     jacinle.log_function.print('Generator orders', *[str(vv[1]).split('\n')[0] for vv in next_gen_vars], sep='\n  ')
@@ -944,34 +994,43 @@ def dpll_solve(
 
             raise CSPNotSolvable()
         else:
-            # jacinle.log_function.print('Can not find a generator. Constraints:\n  ' + '\n  '.join([str(x) for x in constraints]))
+            jacinle.log_function.print('Can not find a generator. Constraints:\n  ' + '\n  '.join([str(x) for x in constraints]))
+            from IPython import embed; embed()
             raise CSPNoGenerator('Can not find a generator. Constraints:\n  ' + '\n  '.join([str(x) for x in constraints]))
 
-    try:
-        assignments = dfs(constraints, {})
-        if not solvable_only:
-            for name, record in csp.index2record.items():
-                dtype = record.dtype
-                if name not in assignments:
-                    g = dpll_find_typegen_variable(executor, dtype)
-                    if g is None:
-                        raise NotImplementedError('Can not find a generator for unbounded variable {}, type {}.'.format(name, dtype))
-                    else:
-                        try:
-                            output_index, (output, ) = next(iter(generator_manager.call(g, 1, [], None)))
-                            assignments[name] = Assignment(AssignmentType.VALUE, output, generator_index=output_index)
-                        except StopIteration:
-                            raise CSPNotSolvable
+    with restore_context():
+        init_assignments = dict()
+        if simulation_state is not None:
+            simulation_interface.restore_state_keep(simulation_state, simulation_state_index)
+            resolve_simulation_fluent_constraints_inplace(simulation_interface, constraints, init_assignments)
+            constraints = dpll_apply_assignments(executor, constraints, init_assignments, simulation_state_index)
+            actions = tuple(None for _ in range(simulation_state_index)) + tuple(actions)
 
-        if generator_manager.store_history:
-            generator_manager.mark_success(assignments)
-        if solvable_only:
-            return True
-        return assignments
-    except CSPNotSolvable:
-        return None
-    except CSPNoGenerator:
-        raise
+        try:
+            assignments = dfs(constraints, init_assignments)
+            if not solvable_only:
+                for name, record in csp.index2record.items():
+                    dtype = record.dtype
+                    if name not in assignments:
+                        g = dpll_find_typegen_variable(executor, dtype)
+                        if g is None:
+                            raise NotImplementedError('Can not find a generator for unbounded variable {}, type {}.'.format(name, dtype))
+                        else:
+                            try:
+                                output_index, (output, ) = next(iter(generator_manager.call(g, 1, [], None)))
+                                assignments[name] = Assignment(AssignmentType.VALUE, output, generator_index=output_index)
+                            except StopIteration:
+                                raise CSPNotSolvable
+
+            if generator_manager.store_history:
+                generator_manager.mark_success(assignments)
+            if solvable_only:
+                return True
+            return assignments
+        except CSPNotSolvable:
+            return None
+        except CSPNoGenerator:
+            raise
 
 
 def dpll_simplify(

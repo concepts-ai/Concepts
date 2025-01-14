@@ -40,12 +40,18 @@ def pose_difference(pose1: Tuple[Vec3f, Vec4f], pose2: Tuple[Vec3f, Vec4f]) -> n
     return np.concatenate([np.asarray(pos2) - np.asarray(pos1), axis * angle])
 
 
-def pose_distance(pose1: Tuple[Vec3f, Vec4f], pose2: Tuple[Vec3f, Vec4f]) -> float:
-    """Compute the difference between two poses: `||pose2 - pose1||`."""
+def pose_distance2(pose1: Tuple[Vec3f, Vec4f], pose2: Tuple[Vec3f, Vec4f]) -> Tuple[float, float]:
+    """Compute the difference between two poses: `||pose2 - pose1||`. This functino returns the positional and angular distance."""
     pos1, quat1 = pose1
     pos2, quat2 = pose2
     angle = quat_diff(quat2, quat1)
-    return np.linalg.norm(np.asarray(pos2) - np.asarray(pos1)) + abs(angle)
+    return np.linalg.norm(np.asarray(pos2) - np.asarray(pos1)), abs(angle)
+
+
+def pose_distance(pose1: Tuple[Vec3f, Vec4f], pose2: Tuple[Vec3f, Vec4f]) -> float:
+    """Compute the difference between two poses: `||pose2 - pose1||`."""
+    pos_error, angle_error = pose_distance2(pose1, pose2)
+    return pos_error + angle_error
 
 
 def angle_distance(quat1: Vec4f, quat2: Vec4f) -> float:

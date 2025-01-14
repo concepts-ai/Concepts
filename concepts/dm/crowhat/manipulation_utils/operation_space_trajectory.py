@@ -12,7 +12,7 @@ import numpy as np
 from typing import Sequence, Tuple, NamedTuple
 from concepts.utils.typing_utils import VecNf, Vec3f, Vec4f
 from concepts.math.interpolation_utils import PoseSpline
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface, MotionPlanningResult
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface, MotionPlanningResult
 from concepts.dm.crowhat.manipulation_utils.pose_utils import pose_distance
 
 
@@ -22,7 +22,7 @@ class OperationSpaceTrajectory(NamedTuple):
 
 
 def gen_joint_trajectory_from_cartesian_path_with_differential_ik(
-    arm: SingleArmMotionPlanningInterface,
+    arm: SingleGroupMotionPlanningInterface,
     start_qpos: VecNf,
     cartesian_path: Sequence[Tuple[Vec3f, Vec4f]],
     step_size: float = 0.01,

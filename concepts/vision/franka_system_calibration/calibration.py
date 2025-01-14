@@ -26,7 +26,7 @@ __all__ = [
     'make_pointcloud_from_rgbd', 'make_open3d_pointcloud',
     'filter_plane', 'make_open3d_plane_object', 'visualize_calibrated_pointclouds',
     'get_camera_configs_using_ar_detection_from_camera_images', 'get_camera_configs_using_ar_detection',
-    'get_world_coordinate_pointclouds'
+    'get_world_coordinate_pointclouds', 'get_world_coordinate_pointclouds_v2'
 ]
 
 
@@ -80,9 +80,12 @@ def get_mounted_camera_pose_from_ar_detections(hand_camera_ar_poses, mounted_cam
 
 
 class DepthRangeFilter(object):
-    def __init__(self, min_depth, max_depth = None):
+    def __init__(self, min_depth, max_depth = None, *, normalize_depth=True):
         self.min_depth = min_depth if max_depth is not None else 0
         self.max_depth = max_depth if max_depth is not None else min_depth
+        if normalize_depth:
+            self.min_depth *= 1000
+            self.max_depth *= 1000
 
     def __call__(self, depth):
         return np.logical_and(self.min_depth < depth, depth <= self.max_depth)
@@ -130,11 +133,12 @@ def make_pointcloud_from_rgbd(rgb, depth, intrinsics, extrinsics, normalize_dept
     return points, rgb
 
 
-def make_open3d_pointcloud(points, colors):
+def make_open3d_pointcloud(points, colors=None):
     import open3d as o3d
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
-    pcd.colors = o3d.utility.Vector3dVector(colors / 255)
+    if colors is not None:
+        pcd.colors = o3d.utility.Vector3dVector(colors / 255)
     return pcd
 
 
@@ -239,17 +243,29 @@ def get_world_coordinate_pointclouds(camera_configs, rgbd_images) -> Dict[str, T
     return pointclouds
 
 
-def get_world_coordinate_pointclouds_v2(camera_captures, depth_filter_fns=None) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+def get_world_coordinate_pointclouds_v2(
+    camera_captures, depth_filter_fns=None, xyz_filter_fns=None
+) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
     pointclouds = dict()
     for camera_name, camera_capture in camera_captures.items():
-        points, colors = make_pointcloud_from_rgbd(camera_capture['color'], camera_capture['depth'], camera_capture['intrinsics'], camera_capture['extrinsics'])
+        points, colors = make_pointcloud_from_rgbd(
+            camera_capture['color'], camera_capture['depth'], camera_capture['intrinsics'], camera_capture['extrinsics']
+        )
 
         if depth_filter_fns is not None:
             if camera_name in depth_filter_fns:
                 mask = depth_filter_fns[camera_name](camera_capture['depth'].flatten())
-                points, colors = points[mask], colors[mask]
+                points[~mask] = 0
             elif '*' in depth_filter_fns:
                 mask = depth_filter_fns['*'](camera_capture['depth'].flatten())
-                points, colors = points[mask], colors[mask]
+                points[~mask] = 0
+
+        if xyz_filter_fns is not None:
+            if camera_name in xyz_filter_fns:
+                mask = xyz_filter_fns[camera_name](*points.T)
+                points[~mask] = 0
+            elif '*' in xyz_filter_fns:
+                mask = xyz_filter_fns['*'](*points.T)
+                points[~mask] = 0
         pointclouds[camera_name] = (points, colors)
     return pointclouds

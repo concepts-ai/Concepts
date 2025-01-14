@@ -449,7 +449,7 @@ class NeuralCCGSemantics(CCGSemantics):
         output.execution_buffer = _merge_list(self.execution_buffer, rhs.execution_buffer)
         output.partial_type = _merge_list(self.partial_type, rhs.partial_type)
         output.nr_execution_steps = self.nr_execution_steps + rhs.nr_execution_steps
-        return output.canonize_execution_buffer()
+        return output.canonicalize_execution_buffer()
 
     @_profile
     def _bapp(self, lhs: 'NeuralCCGSemantics') -> 'NeuralCCGSemantics':
@@ -457,7 +457,7 @@ class NeuralCCGSemantics(CCGSemantics):
         output.execution_buffer = _merge_list(self.execution_buffer, lhs.execution_buffer)
         output.partial_type = _merge_list(self.partial_type, lhs.partial_type)
         output.nr_execution_steps = self.nr_execution_steps + lhs.nr_execution_steps
-        return output.canonize_execution_buffer()
+        return output.canonicalize_execution_buffer()
 
     @_profile
     def _coord3(self, lhs: 'NeuralCCGSemantics', rhs: 'NeuralCCGSemantics') -> 'NeuralCCGSemantics':
@@ -474,8 +474,8 @@ class NeuralCCGSemantics(CCGSemantics):
         output.nr_execution_steps = lhs.nr_execution_steps + rhs.nr_execution_steps + ret.nr_execution_steps
         return output
 
-    def canonize_execution_buffer(self) -> 'NeuralCCGSemantics':
-        """Canonize the execution buffer. Specifically, if the execution buffer has all argument values to the function,
+    def canonicalize_execution_buffer(self) -> 'NeuralCCGSemantics':
+        """canonicalize the execution buffer. Specifically, if the execution buffer has all argument values to the function,
         we execute the function and replace the execution buffer with the result."""
         if self.execution_buffer is not None and len(self.execution_buffer) > 0:
             r0 = self.execution_buffer[0]
@@ -1169,7 +1169,7 @@ class NeuralCCG(nn.Module):
             if ctx.semantics:
                 is_conj = syn.is_conj
                 sem = self._bind_constants(sem, exe, word, word_index=word_index, candidate_lexicon_entry_index=j, is_conj=is_conj)
-                sem = sem.canonize_execution_buffer()
+                sem = sem.canonicalize_execution_buffer()
             else:
                 sem = None
 
@@ -1226,7 +1226,7 @@ class NeuralCCG(nn.Module):
         new_partial_type = None
         nr_execution_steps = 0
 
-        # NB(Jiayuan Mao @ 2022/12/11): this function does need to handle "execution" because a ``canonize_execution_buffer`` function
+        # NB(Jiayuan Mao @ 2022/12/11): this function does need to handle "execution" because a ``canonicalize_execution_buffer`` function
         # will be called in ``_gen_lexicons`` immediately after this function.
         if isinstance(expression, (ConstantExpression, FunctionApplicationExpression)):
             pass

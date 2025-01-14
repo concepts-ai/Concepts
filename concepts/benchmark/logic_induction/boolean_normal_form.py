@@ -58,7 +58,7 @@ class NormalForm(object):
 
     @classmethod
     def from_string(cls, expr):
-        expr = expr.strip().replace(' ', '')  # canonize
+        expr = expr.strip().replace(' ', '')  # canonicalize
         closures = []
         variables = set()
 
@@ -137,7 +137,7 @@ class DNF(NormalForm):
     merge2 = lambda x, y: x and y
 
 
-def _canonize_max(m):
+def _canonicalize_max(m):
     if type(m) is int:
         m = [max(m // 2, 1), max(m, 1)]
     else:
@@ -146,8 +146,8 @@ def _canonize_max(m):
 
 
 def random_generate_cnf(nr_variables, max_ands, max_ors):
-    max_ands = _canonize_max(max_ands)
-    max_ors = _canonize_max(max_ors)
+    max_ands = _canonicalize_max(max_ands)
+    max_ors = _canonicalize_max(max_ors)
 
     closures = []
     nr_ands = random.randint(max_ands[0], max_ands[1] + 1)

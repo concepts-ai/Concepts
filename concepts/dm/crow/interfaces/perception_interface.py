@@ -9,10 +9,15 @@
 # Distributed under terms of the MIT license.
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, List, Dict
+from typing import Any, Optional, Union, Sequence, Tuple, List, Dict
 
 import numpy as np
 
+import concepts.dsl.expression as E
+from concepts.dsl.dsl_types import ObjectConstant
+from concepts.dsl.expression import ObjectOrValueOutputExpression
+from concepts.dsl.constraint import ConstraintSatisfactionProblem
+from concepts.dsl.tensor_value import TensorValue
 from concepts.dm.crow.crow_domain import CrowState
 
 __all__ = ['CrowPerceptionInterface', 'CrowPerceptionResult', 'ObjectTrackingRequest', 'CrowGlobalMemory', 'CrowObjectMemoryItem']
@@ -112,6 +117,13 @@ class CrowPerceptionInterface(object):
         """Get the perception result."""
         raise NotImplementedError()
 
+    def mem_query(
+        self, expression: ObjectOrValueOutputExpression, state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None,
+        bounded_variables: Optional[Dict[str, Union[TensorValue, ObjectConstant]]] = None,
+        state_index: Optional[int] = None
+    ) -> Tuple[CrowState, ConstraintSatisfactionProblem, Dict[str, Union[TensorValue, ObjectConstant]]]:
+        raise NotImplementedError()
+
     def detect(self, name: str) -> None:
         """Detect the object with the given name."""
         raise NotImplementedError()
@@ -127,4 +139,13 @@ class CrowPerceptionInterface(object):
 
     def unregister_object_tracking_feature(self, identifier: int, feature: str) -> None:
         raise NotImplementedError()
+
+
+# class SimpleMemQueryExecutor(object):
+#     def __init__(self, perception_interface: CrowPerceptionInterface):
+#         self._perception_interface = perception_interface
+#
+#     def execute(self, expression: ObjectOrValueOutputExpression, state: CrowState, bounded_variables: Dict[str, Union[TensorValue, ObjectConstant]]) -> CrowState:
+#         if isinstance(expression, E.FindAllExpression):
+#             return self._execute_find_all(expression, state, bounded_variables)
 

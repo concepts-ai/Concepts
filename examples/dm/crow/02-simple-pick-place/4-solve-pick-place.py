@@ -16,6 +16,8 @@ from concepts.dm.crowhat.impl.pybullet.pybullet_sim_interfaces import PyBulletSi
     make_pybullet_simulator_ipc_ports
 from concepts.dm.crowhat.impl.pybullet.pybullet_manipulator_interface import PyBulletSingleArmControllerInterface
 
+# crow.set_crow_regression_algorithm('priority_tree_v1')
+
 DEFAULT_TCP_PORTS = (12020, 12021)
 
 

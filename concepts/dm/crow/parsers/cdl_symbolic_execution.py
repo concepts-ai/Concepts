@@ -16,7 +16,7 @@ from jacinle.utils.enum import JacEnum
 
 import concepts.dsl.expression as E
 from concepts.dm.crow.behavior import (
-    CrowAchieveExpression, CrowAssertExpression, CrowBehaviorApplicationExpression, CrowBindExpression,
+    CrowAchieveExpression, CrowAssertExpression, CrowBehaviorApplicationExpression, CrowBindExpression, CrowMemQueryExpression,
     CrowFeatureAssignmentExpression, CrowRuntimeAssignmentExpression, CrowUntrackExpression
 )
 from concepts.dm.crow.behavior import CrowBehaviorBodyItem, CrowBehaviorBodyPrimitiveBase, CrowBehaviorBodySuiteBase, CrowBehaviorCommit
@@ -282,6 +282,9 @@ class FunctionCallSymbolicExecutor(object):
                 arguments = item.args.arguments[0].items
                 body = item.args.arguments[1]
                 self.behavior_expressions.append(CrowBindExpression(arguments, body))
+            elif item.name == 'mem_query':
+                body = item.args.arguments[0]
+                self.behavior_expressions.append(CrowMemQueryExpression(body))
             elif item.name == 'achieve':
                 term = item.args.arguments[0]
                 self.behavior_expressions.append(CrowAchieveExpression(term, **item.annotations if item.annotations is not None else dict()))
@@ -623,13 +626,16 @@ class FunctionCallSymbolicExecutor2(object):
                         (E.ValueOutputExpression, E.VariableExpression, CrowGeneratorApplicationExpression)
                     ), f'Invalid expr expression: {item.args.arguments[0]}'
                     self.set_unique_return(self._replace_variables(item.args.arguments[0]))
-            elif item.name in ('bind', 'untrack', 'assert', 'commit'):
+            elif item.name in ('bind', 'mem_query', 'untrack', 'assert', 'commit'):
                 if not self.mode.support_misc_behavior_body_statements:
                     raise ValueError(f'Behavior body statement {item} are not allowed in the current mode: {self.mode}')
                 if item.name == 'bind':
                     arguments = item.args.arguments[0].items
                     body = item.args.arguments[1]
                     self.statements.append(CrowBindExpression(arguments, body))
+                elif item.name == 'mem_query':
+                    body = item.args.arguments[0]
+                    self.statements.append(CrowMemQueryExpression(body))
                 elif item.name == 'untrack':
                     term = item.args.arguments[0]
                     self.statements.append(CrowUntrackExpression(term))
@@ -650,7 +656,7 @@ class FunctionCallSymbolicExecutor2(object):
             elif item.name == 'return':
                 if not self.mode.support_return_statements:
                     raise ValueError(f'Return statements are not allowed in the current mode: {self.mode}')
-                assert isinstance(item.args.arguments[0], (E.ValueOutputExpression, E.VariableExpression)), f'Invalid return expression: {item.args.arguments[0]}'
+                assert isinstance(item.args.arguments[0], E.ObjectOrValueOutputExpression), f'Invalid return expression: {item.args.arguments[0]}'
                 self.return_expression = _make_conditional_return(current_return_statement, current_return_statement_condition_neg, self._replace_variables(item.args.arguments[0]))
                 break
             elif item.name == 'ordering':

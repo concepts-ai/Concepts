@@ -10,23 +10,24 @@
 
 import itertools
 from typing import Optional, Iterator, Tuple, List, NamedTuple
+
 from jacinle.utils.cache import cached_property
 
 import numpy as np
 import open3d as o3d
 
-from concepts.math.rotationlib_xyzw import find_orthogonal_vector, quat_mul, rotate_vector, enumerate_quaternion_from_vectors, quaternion_from_axes
+from concepts.math.rotationlib_xyzw import find_orthogonal_vector, quat_mul, rotate_vector, enumerate_quaternion_from_vectors, quaternion_from_axes, euler2quat
 from concepts.math.cad.mesh_utils import mesh_line_intersect
 from concepts.dm.crowhat.world.planning_world_interface import PlanningWorldInterface
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface
 from concepts.dm.crowhat.manipulation_utils.contact_point_sampler import ContactPointProposal, gen_ee_pose_from_contact_point, pairwise_sample, _sample_points_uniformly
 from concepts.dm.crowhat.manipulation_utils.path_generation_utils import is_collision_free_qpos
 
 __all__ = [
     'GraspContactPairProposal', 'gen_grasp_contact_pair',
-    'GraspParameter', 'gen_grasp_parameter',
+    'GraspParameter', 'gen_grasp_parameter', 'gen_grasp_parameter_boxtopgrasp',
     'calc_grasp_approach_ee_pose_trajectory',
-    'PlacementParameter', 'gen_placement_parameter'
+    'PlacementParameter', 'gen_placement_parameter', 'gen_placement_parameter_on_table',
 ]
 
 
@@ -176,13 +177,13 @@ def gen_grasp_contact_pair_with_support_constraint(
 
 
 class GraspParameter(NamedTuple):
-    contact_pair: GraspContactPairProposal
+    contact_pair: Optional[GraspContactPairProposal]
     robot_ee_pose: Tuple[np.ndarray, np.ndarray]
     robot_qpos: np.ndarray
 
 
 def gen_grasp_parameter(
-    planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface,
+    planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface,
     object_id: int, gripper_distance: float, *,
     gripper_min_distance: float = 0.0001,
     surface_pointing_tol: float = 0.9,
@@ -211,12 +212,28 @@ def gen_grasp_parameter(
             ee_norm2 = np.cross(ee_d, ee_norm1)
             ee_quat = quaternion_from_axes(ee_norm2, ee_d, ee_norm1)
 
+            if verbose:
+                print('Trying grasp position', grasp_center)
+                print('Trying grasp orientation', ee_quat)
+
             qpos = robot.ik(grasp_center, ee_quat)
             if qpos is not None:
-                rv = is_collision_free_qpos(robot, qpos, verbose=verbose)
-                # robot.set_qpos(qpos)
-                # print('is_collision_free_qpos', rv)
-                # import ipdb; ipdb.set_trace()
+                rv = is_collision_free_qpos(robot, qpos, verbose=False)
+
+                if verbose:
+                    print('is_collision_free_qpos', rv)
+                    if not rv:
+                        from concepts.dm.crowhat.impl.pybullet.pybullet_planning_world_interface import PyBulletPlanningWorldInterface
+                        from concepts.simulator.pybullet.world import pprint_contact_list
+
+                        if isinstance(planning_world, PyBulletPlanningWorldInterface):
+                            backup = robot.get_qpos()
+                            robot.set_qpos(qpos)
+                            contacts = planning_world.client.world.get_contact(a=robot.get_body_id())
+                            pprint_contact_list(contacts)
+
+                            planning_world.client.wait_for_user('Press any key to continue.')
+                            robot.set_qpos(backup)
 
                 if rv:
                     yield GraspParameter(
@@ -227,6 +244,40 @@ def gen_grasp_parameter(
                     print('    gripper pos', grasp_center)
                     print('    gripper quat', ee_quat)
                     print('    skip: collision')
+
+
+def gen_grasp_parameter_boxtopgrasp(
+    planning_world: PlanningWorldInterface,
+    robot: SingleGroupMotionPlanningInterface,
+    object_id: int,
+    grasp_depth: float = 0.01,
+    max_trial: int = 1000,
+    np_random: Optional[np.random.RandomState] = None,
+    verbose: bool = False
+) -> Iterator[GraspParameter]:
+    if np_random is None:
+        np_random = np.random
+
+    pointcloud = planning_world.get_object_point_cloud(object_id)
+    top_center = np.array([*pointcloud[..., :2].mean(axis=0), pointcloud[..., 2].max()])
+    grasp_center = top_center
+    grasp_center[2] += grasp_depth
+
+    for _ in range(max_trial):
+        yaw_angle = 2 * np.pi * np_random.rand()
+        ee_quat = euler2quat([0., 0., yaw_angle])
+        print('Trying grasp position', grasp_center)
+        print('Trying grasp orientation', ee_quat)
+
+        qpos = robot.ik(grasp_center, ee_quat)
+        if qpos is not None:
+            rv = is_collision_free_qpos(robot, qpos, verbose=verbose)
+            if rv:
+                yield GraspParameter(contact_pair=None, robot_ee_pose=(grasp_center, ee_quat), robot_qpos=qpos)
+            elif verbose:
+                print('    gripper pos', grasp_center)
+                print('    gripper quat', ee_quat)
+                print('    skip: collision')
 
 
 def calc_grasp_approach_ee_pose_trajectory(grasp_parameter: GraspParameter, pregrasp_distance: float = 0.1) -> List[Tuple[np.ndarray, np.ndarray]]:
@@ -255,7 +306,7 @@ class BimanualGraspParameter(NamedTuple):
 
 
 def gen_bimanual_grasp_parameter(
-    planning_world: PlanningWorldInterface, robot1: SingleArmMotionPlanningInterface, robot2: SingleArmMotionPlanningInterface,
+    planning_world: PlanningWorldInterface, robot1: SingleGroupMotionPlanningInterface, robot2: SingleGroupMotionPlanningInterface,
     object_id: int, support_id: int, gripper_distance: float, *,
     ee_contact_side: str = 'front',
     pre_contact_distance: float = 0.05, post_contact_distance: float = 0.01,
@@ -301,7 +352,7 @@ def gen_bimanual_grasp_parameter(
 
 
 def pybullet_visualize_binamual_grasp_parameter(
-    planning_world: PlanningWorldInterface, robot1: SingleArmMotionPlanningInterface, robot2: SingleArmMotionPlanningInterface,
+    planning_world: PlanningWorldInterface, robot1: SingleGroupMotionPlanningInterface, robot2: SingleGroupMotionPlanningInterface,
     object_id: int, support_id: int, parameter: BimanualGraspParameter
 ):
     from concepts.dm.crowhat.impl.pybullet.pybullet_planning_world_interface import PyBulletPlanningWorldInterface
@@ -391,7 +442,11 @@ def gen_placement_parameter(
             current_target_pos, current_target_quat = planning_world.get_object_pose(target_id)
 
             # Solve for a quaternion that aligns the tool normal with the target normal
-            for rotation_quat in enumerate_quaternion_from_vectors(target_point_normal, support_point_normal, 4):
+            if retain_target_orientation:
+                candidate_quaternions = [current_target_quat]
+            else:
+                candidate_quaternions = enumerate_quaternion_from_vectors(target_point_normal, support_point_normal, 4)
+            for rotation_quat in candidate_quaternions:
                 # This is the world coordinate for the tool point after rotation.
                 new_target_point_pos = current_target_pos + rotate_vector(target_point_pos - current_target_pos, rotation_quat)
                 # Now compute the displacement for the tool object
@@ -410,10 +465,110 @@ def gen_placement_parameter(
                             break
 
                 if success:
-                    yield PlacementParameter(
+                    rv = PlacementParameter(
                         object_id=target_id,
                         support_id=support_id,
                         target_pos=final_target_pos,
                         target_quat=final_target_quat,
                         support_normal=support_point_normal
                     )
+                    yield rv
+
+
+def gen_placement_parameter_on_table(
+    planning_world: PlanningWorldInterface,
+    target_id: int, support_id: int, table_x_range: Tuple[float, float], table_y_range: Tuple[float, float], table_z: float,
+    *,
+    retain_target_orientation: bool = True,
+    batch_size: int = 100, max_attempts: int = 10000,
+    placement_tol: float = 0.03, support_dir_tol: float = 30,
+    np_random: Optional[np.random.RandomState] = None,
+    verbose: bool = False
+) -> Iterator[PlacementParameter]:
+    """Sample a placement of the target object on the support object.
+
+    Args:
+        planning_world: the planning world.
+        robot: the robot interface.
+        target_id: the id of the target object.
+        support_id: the id of the support object.
+        retain_target_orientation: if True, the target object will be placed with the same orientation as the current one.
+        batch_size: the number of samples in batch processing.
+        max_attempts: the maximum number of attempts for sampling.
+        placement_tol: the tolerance for the placement. To check collision, we will place the object at a position that is `placement_tol` away from the support surface and check for collision.
+        support_dir_tol: the tolerance for the support direction. We will sample the placement direction such that the support direction is within `support_dir_tol` degree from the gravity direction.
+        np_random: the random state.
+        verbose: whether to print the sampling information.
+
+    Yields:
+        the placement parameters.
+    """
+    if np_random is None:
+        np_random = np.random
+
+    target_mesh = planning_world.get_object_mesh(target_id)
+    support_mesh = planning_world.get_object_mesh(support_id)
+
+    nr_batches = int(max_attempts / batch_size)
+    for _ in range(nr_batches):
+        # support_points = _sample_points_uniformly(support_mesh, batch_size, use_triangle_normal=True, seed=np_random.randint(0, 1000000))
+        # normals = np.asarray(support_points.normals)
+        # support_indices = np.where(normals.dot(np.array([0, 0, 1])) > np.cos(np.deg2rad(support_dir_tol)))[0]
+
+        support_points = np.array([
+            (np_random.uniform(table_x_range[0], table_x_range[1]), np_random.uniform(table_y_range[0], table_y_range[1]), table_z)
+            for _ in range(batch_size)
+        ], dtype=np.float32)
+        support_indices = list(range(batch_size))
+
+        target_points = _sample_points_uniformly(target_mesh, batch_size, use_triangle_normal=True, seed=np_random.randint(0, 1000000))
+
+        if retain_target_orientation:
+            normals = np.asarray(target_points.normals)
+            target_indices = np.where(normals.dot(np.array([0, 0, -1])) > np.cos(np.deg2rad(support_dir_tol)))[0]
+        else:
+            target_indices = list(range(batch_size))
+
+        all_pair_indices = list(itertools.product(target_indices, support_indices))
+        np_random.shuffle(all_pair_indices)
+        for target_index, support_index in all_pair_indices:
+            target_point_pos = np.asarray(target_points.points[target_index])
+            target_point_normal = -np.asarray(target_points.normals[target_index])
+
+            support_point_pos = np.asarray(support_points[support_index])
+            support_point_normal = np.asarray([0, 0, 1], dtype=np.float32)
+
+            current_target_pos, current_target_quat = planning_world.get_object_pose(target_id)
+
+            # Solve for a quaternion that aligns the tool normal with the target normal
+            if retain_target_orientation:
+                candidate_quaternions = [current_target_quat]
+            else:
+                candidate_quaternions = enumerate_quaternion_from_vectors(target_point_normal, support_point_normal, 4)
+            for rotation_quat in candidate_quaternions:
+                # This is the world coordinate for the tool point after rotation.
+                new_target_point_pos = current_target_pos + rotate_vector(target_point_pos - current_target_pos, rotation_quat)
+                # Now compute the displacement for the tool object
+                final_target_pos = support_point_pos - new_target_point_pos + current_target_pos
+                final_target_pos += support_point_normal * placement_tol
+                final_target_quat = quat_mul(rotation_quat, current_target_quat)
+
+                success = True
+                with planning_world.checkpoint_world():
+                    planning_world.set_object_pose(target_id, (final_target_pos, final_target_quat))
+                    contacts = planning_world.get_contact_points(target_id)
+
+                    for contact in contacts:
+                        if contact.body_b != target_id:
+                            success = False
+                            break
+
+                if success:
+                    rv = PlacementParameter(
+                        object_id=target_id,
+                        support_id=support_id,
+                        target_pos=final_target_pos,
+                        target_quat=final_target_quat,
+                        support_normal=support_point_normal
+                    )
+                    yield rv

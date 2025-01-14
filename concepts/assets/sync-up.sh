@@ -8,7 +8,7 @@
 
 set -e
 
-tar czvf assets.tar basic blender cliport objects robots visual_reasoning_datasets
+tar czvf assets.tar basic cliport objects robots visual_reasoning_datasets
 #rsync -avP assets.tar droplet.jiayuanm.com:~/concepts_docs/html
 rsync -avP assets.tar iris@droplet.jiayuanm.com:~/concepts_docs/html
 rm assets.tar

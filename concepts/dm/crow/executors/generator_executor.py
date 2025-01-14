@@ -159,6 +159,8 @@ def wrap_singletime_function_to_iterator(function: CrowPythonFunctionRef, max_ex
                 yield from itertools.islice(function.iter_from(*args, **kwargs), max_examples)
             except Exception as e:
                 logger.warning(f'Exception raised when calling generator {function}: {e}')
+                import traceback
+                traceback.print_exc()
 
         return wrapped
 

@@ -16,22 +16,23 @@ from concepts.dm.crowhat.impl.pybullet.pybullet_planning_world_interface import 
 from concepts.dm.crowhat.impl.pybullet.pybullet_sim_interfaces import PyBulletPhysicalControllerInterface, PyBulletSimulationControllerInterface
 from concepts.dm.crowhat.world.manipulator_interface import (
     RobotArmJointTrajectory, RobotControllerExecutionContext, RobotControllerExecutionFailed, SingleArmControllerInterface,
-    SingleArmMotionPlanningInterface
+    SingleGroupMotionPlanningInterface
 )
 from concepts.dm.crowhat.world.planning_world_interface import AttachmentInfo, PlanningWorldInterface
 from concepts.simulator.pybullet.components.panda.panda_robot import PandaRobot
-from concepts.simulator.pybullet.components.robot_base import BulletArmRobotBase
+from concepts.simulator.pybullet.components.robot_base import BulletArmRobotBase, BulletMultiChainRobotRobotBase
 from concepts.utils.typing_utils import Vec3f, Vec4f, VecNf
 
-__all__ = ['PyBulletSingleArmMotionPlanningInterface', 'PyBulletSingleArmControllerInterface']
+__all__ = ['PyBulletSingleArmMotionPlanningInterface', 'PyBulletSubchainMotionPlanningInterface', 'PyBulletSingleArmControllerInterface']
 
 
-class PyBulletSingleArmMotionPlanningInterface(SingleArmMotionPlanningInterface):
+class PyBulletSingleArmMotionPlanningInterface(SingleGroupMotionPlanningInterface):
     def __init__(self, robot: BulletArmRobotBase, planning_world: Optional[PlanningWorldInterface]):
         super().__init__(planning_world)
         self._robot = robot
         self._joints = self._robot.get_joint_ids()
         self._joint_limits = self._robot.get_joint_ids()
+        self.set_configuration_space_extra_validation_func(self._robot.is_qpos_valid)
 
     def get_nr_joints(self) -> int:
         return len(self._joints)
@@ -69,16 +70,26 @@ class PyBulletSingleArmMotionPlanningInterface(SingleArmMotionPlanningInterface)
         return self._robot.get_qpos()
 
     def _set_qpos(self, qpos: np.ndarray):
-        return self._robot.set_qpos_with_holding(qpos)
+        self._robot.set_qpos_with_attached_objects(qpos)
+
+        planning_world: PyBulletPlanningWorldInterface = self.planning_world
+        if planning_world.mplib_client is not None:
+            planning_world.mplib_client.get_robot(self._robot.get_body_name()).set_qpos(qpos)
+
+            if (index := self._robot.get_attached_object()) is not None:
+                name = planning_world.client.world.get_body_name(index)
+                planning_world.mplib_client.set_object_pose(name, *planning_world.client.world.get_body_state_by_id(index).get_transformation())
 
     def _add_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None, ee_to_object: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
         assert link is None, 'PyBullet does not support attachment to a specific link (other than the base link of the object).'
         assert self_link is None, 'PyBullet does not support non-EE attachments.'
-        assert self._robot.get_attached_object() is None, 'PyBullet does not support multiple attachments.'
-        self._robot.attach_object(body, ee_to_object)
+        if self._robot.get_attached_object() is not None:
+            import ipdb; ipdb.set_trace()
+        assert self._robot.get_attached_object() is None, 'The robot is already attached to an object.'
+        self._robot.attach_object(body, ee_to_object, simulate_gripper=False)
         return None
 
-    def _remove_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None):
+    def _remove_attachment(self, body: Union[str, int, None], link: Optional[int] = None, self_link: Optional[int] = None):
         self._robot.detach_object()
 
     def _get_attached_objects(self) -> List[AttachmentInfo]:
@@ -93,17 +104,88 @@ class PyBulletSingleArmMotionPlanningInterface(SingleArmMotionPlanningInterface)
     def rrt_collision_free(
         self, qpos1: np.ndarray, qpos2: Optional[np.ndarray] = None,
         ignored_collision_bodies: Optional[List[Union[str, int]]] = None,
-        smooth_fine_path: bool = False, ignore_rendering: bool = True, **kwargs
+        smooth_fine_path: bool = False, disable_rendering: bool = True, **kwargs
     ) -> Tuple[bool, Optional[List[np.ndarray]]]:
-        if ignore_rendering:
+        if disable_rendering:
             assert isinstance(self.planning_world, PyBulletPlanningWorldInterface), 'The planning world must be a PyBulletPlanningWorldInterface.'
-            client = self.planning_world.client
+            planning_world: PyBulletPlanningWorldInterface = self.planning_world
+            client = planning_world.client
             with client.disable_rendering(suppress_stdout=False):
                 return super().rrt_collision_free(qpos1, qpos2, ignored_collision_bodies, smooth_fine_path, **kwargs)
         return super().rrt_collision_free(qpos1, qpos2, ignored_collision_bodies, smooth_fine_path, **kwargs)
 
 
+class PyBulletSubchainMotionPlanningInterface(SingleGroupMotionPlanningInterface):
+    """A motion planning interface for a subchain of a robot that mimics the behavior of a "single-armed" robot."""
+
+    def __init__(self, robot: BulletMultiChainRobotRobotBase, ee_link_name: str, planning_world: Optional[PlanningWorldInterface]):
+        super().__init__(planning_world)
+        self._robot = robot
+        self._joints = self._robot.get_joint_ids()
+        self._joint_limits = self._robot.get_joint_limits()
+        self._ee_link_name = ee_link_name
+        self._ee_link_id = self._robot.world.get_link_index_with_body(self._robot.get_body_id(), ee_link_name)
+        self.set_configuration_space_extra_validation_func(self._robot.is_qpos_valid)
+
+    def get_nr_joints(self) -> int:
+        return len(self._joints)
+
+    def get_joint_limits(self):
+        return self._joint_limits
+
+    def get_body_id(self) -> int:
+        return self._robot.get_body_id()
+
+    def get_ee_link_id(self) -> int:
+        return self._ee_link_id
+
+    def get_ee_default_quat(self) -> Vec4f:
+        return self._robot.get_ee_link_default_quat(self._ee_link_id)
+
+    def _fk(self, qpos):
+        return self._robot.fk(qpos, link_name_or_id=self._ee_link_id)
+
+    def _ik(self, pos, quat, qpos=None, max_distance=None) -> Optional[np.ndarray]:
+        if max_distance is None:
+            max_distance = float(1e9)
+        return self._robot.ik_tracik(pos, quat, self._ee_link_id, last_qpos=qpos, max_distance=max_distance)
+        # return self._robot.ik_scipy(pos, quat, group_name=self._group_name, last_qpos=qpos, max_distance=max_distance)
+
+    def _jacobian(self, qpos):
+        return self._robot.get_jacobian(qpos, link_id=self._ee_link_id)
+
+    def _mass(self, qpos: np.ndarray) -> np.ndarray:
+        return self._robot.get_mass_matrix(qpos)
+
+    def _coriolis(self, qpos: np.ndarray, qvel: np.ndarray) -> np.ndarray:
+        return self._robot.get_coriolis_torque(qpos, qvel)
+
+    def _get_qpos(self) -> VecNf:
+        return self._robot.get_qpos()
+
+    def _set_qpos(self, qpos: np.ndarray):
+        return self._robot.set_qpos_with_attached_objects(qpos)
+
+    def _add_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None, ee_to_object: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
+        raise NotImplementedError('Subchain motion planning interface does not support attachments.')
+
+    def _remove_attachment(self, body: Union[str, int], link: Optional[int] = None, self_link: Optional[int] = None):
+        raise NotImplementedError('Subchain motion planning interface does not support attachments.')
+
+    def _get_attached_objects(self) -> List[AttachmentInfo]:
+        attached_object = list()
+        for ee_id in self._robot.gripper_constraints:
+            if self._robot.get_attached_object(ee_id) is not None:
+                attached_object.append(AttachmentInfo(
+                    body_a=self.get_body_id(), link_a=ee_id, body_b=self._robot.get_attached_object(ee_id), link_b=-1,
+                    a_to_b=self._robot.get_attached_object_pose_in_ee_frame(ee_id)
+                ))
+        return attached_object
+
+
 class PyBulletSingleArmControllerInterface(SingleArmControllerInterface):
+    """This implementation has been deprecated."""
+
     def __init__(self, panda_robot, timeout_multiplier: float = 1.0):
         super().__init__()
         self._panda_robot = panda_robot

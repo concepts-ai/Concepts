@@ -1,0 +1,126 @@
+def [[simulation]] on(x: Object, y: Object) -> bool
+feature is_table(x: Object) -> bool
+
+typedef GraspParameter: pyobject
+typedef PlacementParameter: pyobject
+typedef PushParameter: pyobject
+typedef IndirectPushParameter: pyobject
+
+def [[simulation, generator_placeholder]] valid_push(x: Object, support: Object, push_param: PushParameter) -> bool
+def [[simulation, generator_placeholder]] valid_push_trajectory(x: Object, support: Object, push_param: PushParameter, current_qpos: QPos, push_trajectory: Trajectory) -> bool
+def [[simulation, generator_placeholder]] valid_indirect_push(tool: Object, target: Object, support: Object, indirect_push_param: IndirectPushParameter) -> bool
+def [[simulation, generator_placeholder]] valid_indirect_push_trajectory(tool: Object, target: Object, support: Object, indirect_push_param: IndirectPushParameter, current_qpos: QPos, indirect_push_trajectory: Trajectory) -> bool
+def [[simulation, generator_placeholder]] valid_grasp(x: Object, grasp_param: GraspParameter) -> bool
+def [[simulation, generator_placeholder]] valid_grasp_trajectory(x: Object, grasp_param: GraspParameter, current_qpos: QPos, grasp_trajectory: Trajectory) -> bool
+def [[simulation, generator_placeholder]] valid_placement(x: Object, place_param: PlacementParameter) -> bool
+def [[simulation, generator_placeholder]] valid_placement_on(x: Object, y: Object, place_param: PlacementParameter) -> bool
+def [[simulation, generator_placeholder]] valid_placement_trajectory(x: Object, place_param: PlacementParameter, current_qpos: QPos, place_trajectory: Trajectory) -> bool
+
+generator [[simulation]] gen_push(x: Object, support: Object, push_param: PushParameter):
+  goal: valid_push(x, support, push_param)
+  in: x, support
+  out: push_param
+
+generator [[simulation]] gen_push_trajectory(x: Object, support: Object, push_param: PushParameter, current_qpos: QPos, push_trajectory: Trajectory):
+  goal: valid_push_trajectory(x, support, push_param, current_qpos, push_trajectory)
+  in: x, support, push_param, current_qpos
+  out: push_trajectory
+
+generator [[simulation]] gen_indirect_push(tool: Object, target: Object, support: Object, indirect_push_param: IndirectPushParameter):
+  goal: valid_indirect_push(tool, target, support, indirect_push_param)
+  in: tool, target, support
+  out: indirect_push_param
+
+generator [[simulation]] gen_indirect_push_trajectory(tool: Object, target: Object, support: Object, indirect_push_param: IndirectPushParameter, current_qpos: QPos, indirect_push_trajectory: Trajectory):
+  goal: valid_indirect_push_trajectory(tool, target, support, indirect_push_param, current_qpos, indirect_push_trajectory)
+  in: tool, target, support, indirect_push_param, current_qpos
+  out: indirect_push_trajectory
+
+generator [[simulation]] gen_grasp(x: Object, grasp_param: GraspParameter):
+  goal: valid_grasp(x, grasp_param)
+  in: x
+  out: grasp_param
+
+generator [[simulation]] gen_grasp_trajectory(x: Object, grasp_param: GraspParameter, current_qpos: QPos, grasp_trajectory: Trajectory):
+  goal: valid_grasp_trajectory(x, grasp_param, current_qpos, grasp_trajectory)
+  in: x, grasp_param, current_qpos
+  out: grasp_trajectory
+
+generator [[simulation]] gen_placement(x: Object, place_param: PlacementParameter):
+  goal: valid_placement(x, place_param)
+  in: x
+  out: place_param
+
+generator [[simulation]] gen_placement_on(x: Object, y: Object, place_param: PlacementParameter):
+  goal: valid_placement_on(x, y, place_param)
+  in: x, y
+  out: place_param
+
+generator [[simulation]] gen_placement_trajectory(x: Object, place_param: PlacementParameter, current_qpos: QPos, place_trajectory: Trajectory):
+  goal: valid_placement_trajectory(x, place_param, current_qpos, place_trajectory)
+  in: x, place_param, current_qpos
+  out: place_trajectory
+
+def [[simulation]] blocking_grasping(x: Object, o: Object) -> bool
+def [[simulation]] get_all_blocking_grasping_objects(x: Object) -> Object[]
+def [[simulation]] blocking_placing(y: Object, o: Object) -> bool
+def [[simulation]] get_all_blocking_placing_objects(y: Object) -> Object[]
+
+behavior grasp(x: Object):
+  goal: holding(x)
+  body:
+    let blocking_grasping_objects = get_all_blocking_grasping_objects(x)
+    promotable:
+      foreach o in blocking_grasping_objects:
+        achieve not blocking_grasping(x, o)
+    bind grasp_param: GraspParameter where:
+      valid_grasp(x, grasp_param)
+    bind grasp_trajectory: Trajectory where:
+      valid_grasp_trajectory(x, grasp_param, qpos(), grasp_trajectory)
+    do move_ctl(grasp_trajectory)
+    do grasp_ctl(x)
+  eff:
+    holding[x] = True
+    [[simulation]] qpos = ...
+
+behavior place_on(x: Object, y: Object):
+  goal: on(x, y)
+  body:
+    let blocking_grasping_objects = get_all_blocking_grasping_objects(x)
+    let blocking_placing_objects = get_all_blocking_placing_objects(y)
+    promotable:
+      foreach o in blocking_placing_objects:
+        achieve not blocking_placing(y, o)
+      foreach o in blocking_grasping_objects:
+        achieve not blocking_grasping(x, o)
+
+    # Note: we have to explicitly promote the "blocking_grasping_objects" earlier, instead of the entire
+    # "holding(x)." The reason is that, if we promoted "holding(x)", there will be cases where the planner tries to check
+    # grasp(A) -> get_all_blocking_grasping_objects(B) -> ...
+    # In this case, the state when "get_all_blocking_grasping_objects(B)" is not totally committed yet.
+    # This will issue an error that "we can't handle object list [] as an optimistic variable."
+
+    achieve holding(x)
+    bind place_param: PlacementParameter where:
+      valid_placement_on(x, y, place_param)
+    bind place_trajectory: Trajectory where:
+      valid_placement_trajectory(x, place_param, qpos(), place_trajectory)
+    do move_ctl(place_trajectory)
+    do open_gripper_ctl()
+
+    commit
+  eff:
+    holding[x] = False
+    [[simulation]] qpos = ...
+    [[simulation]] pose_of[x] = ...
+
+behavior non_blocking(x: Object, o: Object):
+  goal: not blocking_grasping(x, o)
+  goal: not blocking_placing(x, o)
+  body:
+    bind table: Object where:
+      is_table(table)
+    achieve on(o, table)
+  # eff:
+  #   blocking_grasping[x, o] = False
+  #   blocking_placing[x, o] = False

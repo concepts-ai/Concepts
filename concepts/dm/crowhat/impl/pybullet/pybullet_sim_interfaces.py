@@ -19,7 +19,7 @@ import tempfile
 import shutil
 import atexit
 import queue
-from typing import Any, Optional, Callable, Tuple
+from typing import Any, Optional, Callable, Tuple, TYPE_CHECKING
 
 from jacinle.utils.printing import colored
 from jacinle.utils.network import get_free_port
@@ -31,6 +31,9 @@ from concepts.dm.crowhat.world.manipulator_interface import RobotControllerExecu
 from concepts.simulator.pybullet.client import BulletClient
 from concepts.simulator.pybullet.world import BulletSaver
 
+if TYPE_CHECKING:
+    from concepts.simulator.mplib.client import MPLibClient
+
 __all__ = [
     'PyBulletSimulationControllerInterface', 'PyBulletPhysicalControllerInterface', 'PyBulletRemoteService',
     'PyBulletRemotePerceptionInterface', 'PybulletRemoteControllerInterface',
@@ -39,10 +42,11 @@ __all__ = [
 
 
 class PyBulletSimulationControllerInterface(CrowSimulationControllerInterface):
-    def __init__(self, bullet_client: BulletClient):
+    def __init__(self, bullet_client: BulletClient, mplib_client: Optional['MPLibClient'] = None):
         super().__init__()
 
         self._bullet_client = bullet_client
+        self._mplib_client = mplib_client
         self._state_getter = None
         self._saved_states = dict()
         self._saved_states_counter = 0
@@ -50,6 +54,10 @@ class PyBulletSimulationControllerInterface(CrowSimulationControllerInterface):
     @property
     def bullet_client(self):
         return self._bullet_client
+
+    @property
+    def mplib_client(self):
+        return self._mplib_client
 
     @property
     def saved_states(self):
@@ -63,7 +71,7 @@ class PyBulletSimulationControllerInterface(CrowSimulationControllerInterface):
         self._saved_states_counter += 1
 
         indent = self._saved_states_counter
-        saver = self._bullet_client.world.save_world_builtin()
+        saver = self._bullet_client.world.save_world()
         saver.save()
         self._saved_states[indent] = saver
         return indent
@@ -75,9 +83,26 @@ class PyBulletSimulationControllerInterface(CrowSimulationControllerInterface):
         saver = self._saved_states[state_identifier]
         if isinstance(saver, BulletSaver):
             saver.restore()
+            if self._mplib_client is not None:
+                self._mplib_client.sync_object_states(self._bullet_client)
         else:
             saver()
         del self._saved_states[state_identifier]
+
+    def restore_state_keep(self, state_identifier: int, action_counter: Optional[int] = None, **kwargs):
+        if state_identifier not in self._saved_states:
+            raise ValueError(f"State {state_identifier} not found. Note that the state can only be restored once.")
+
+        saver = self._saved_states[state_identifier]
+        if isinstance(saver, BulletSaver):
+            saver.restore()
+            if self._mplib_client is not None:
+                self._mplib_client.sync_object_states(self._bullet_client)
+        else:
+            saver()
+
+        if action_counter is not None:
+            self._action_counter = action_counter
 
     def register_controller(self, name: str, function: Callable):
         super().register_controller(name, function)

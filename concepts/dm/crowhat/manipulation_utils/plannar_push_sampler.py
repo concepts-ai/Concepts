@@ -22,7 +22,7 @@ import jacinle
 from concepts.math.rotationlib_xyzw import find_orthogonal_vector, quat_mul, rotate_vector, enumerate_quaternion_from_vectors, quaternion_from_axes
 from concepts.math.cad.mesh_utils import mesh_line_intersect
 from concepts.dm.crowhat.world.planning_world_interface import PlanningWorldInterface
-from concepts.dm.crowhat.world.manipulator_interface import SingleArmMotionPlanningInterface
+from concepts.dm.crowhat.world.manipulator_interface import SingleGroupMotionPlanningInterface
 from concepts.dm.crowhat.manipulation_utils.contact_point_sampler import ContactPointProposal, _sample_points_uniformly
 
 
@@ -96,8 +96,8 @@ class PlanarPushParameter(object):
 
 
 def gen_planar_push_parameter(
-    planning_world: PlanningWorldInterface, robot: SingleArmMotionPlanningInterface, object_id: int, support_id: int, *,
-    prepush_distance: float = 0.1,
+    planning_world: PlanningWorldInterface, robot: SingleGroupMotionPlanningInterface, object_id: int, support_id: int, *,
+    prepush_distance: float = 0.05,
     push_distance_fn: Optional[Callable] = None,
     max_attempts: int = 1000, batch_size: int = 100,
     np_random: Optional[np.random.RandomState] = None,
@@ -107,7 +107,10 @@ def gen_planar_push_parameter(
         push_distance_fn = lambda: 0.1
 
     for contact_point in gen_planar_push_contact_point(planning_world, object_id, support_id, max_attempts=max_attempts, batch_size=batch_size, np_random=np_random, verbose=verbose):
-        yield PlanarPushParameter(contact_point.object_id, contact_point.point, -contact_point.normal, prepush_distance, push_distance_fn(), (contact_point.point, robot.ee_default_quat))
+        yield PlanarPushParameter(
+            contact_point.object_id, contact_point.point, -contact_point.normal, prepush_distance, push_distance_fn(),
+            (contact_point.point, robot.ee_default_quat)
+        )
 
 
 def calc_push_ee_pose_trajectory(planar_push_parameter: PlanarPushParameter) -> List[Tuple[np.ndarray, np.ndarray]]:

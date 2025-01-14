@@ -43,7 +43,7 @@ inline_args = v_args(inline=True)
 __all__ = [
     'CDLPathResolver', 'get_default_path_resolver',
     'CDLParser', 'get_default_parser',
-    'load_domain_file', 'load_domain_string', 'load_domain_string_incremental',
+    'load_domain_file', 'load_domain_string', 'load_domain_file_incremental', 'load_domain_string_incremental',
     'load_problem_file', 'load_problem_string',
     'parse_expression',
     'CDLDomainTransformer', 'CDLProblemTransformer', 'CDLExpressionInterpreter',
@@ -125,16 +125,17 @@ class CDLParser(object):
 
         return self.parser.parse(s)
 
-    def parse_domain(self, filename: str) -> CrowDomain:
+    def parse_domain(self, filename: str, domain: Optional[CrowDomain] = None) -> CrowDomain:
         """Parse a PDSketch v3 domain file.
 
         Args:
             filename: the filename to parse.
+            domain: the domain to use. If not provided, a new domain will be created.
 
         Returns:
             the parsed domain.
         """
-        return self.transform_domain(self.parse(filename))
+        return self.transform_domain(self.parse(filename), domain=domain)
 
     def parse_domain_str(self, s: str, domain: Optional[CrowDomain] = None) -> Any:
         """Parse a PDSketch v3 domain string.
@@ -292,6 +293,20 @@ def load_domain_string(string: str) -> CrowDomain:
     return get_default_parser().parse_domain_str(string)
 
 
+def load_domain_file_incremental(domain: CrowDomain, filename: str) -> CrowDomain:
+    """Load a domain file incrementally.
+
+    Args:
+        domain: the domain object to be updated.
+        filename: the filename of the domain file.
+
+    Returns:
+        the domain object.
+    """
+
+    return get_default_parser().parse_domain(filename, domain=domain)
+
+
 def load_domain_string_incremental(domain: CrowDomain, string: str) -> CrowDomain:
     """Load a domain from a string incrementally.
 
@@ -384,7 +399,7 @@ def _gen_term_expr_func(expr_typename: str):
         assert len(values) % 2 == 1, f'[{expr_typename}] expressions expected an odd number of values, got {len(values)}. Values: {values}.'
         result = values[0]
         for i in range(1, len(values), 2):
-            v1, v2 = _canonize_arguments_same_dtype([result, values[i + 1]])
+            v1, v2 = _canonicalize_arguments_same_dtype([result, values[i + 1]])
             t = v1.return_type
             if t.is_uniform_sequence_type:
                 t = t.element_type
@@ -414,13 +429,13 @@ def _gen_bitop_expr_func(expr_typename: str):
         values = [self.visit(value) for value in values]
         if len(values) == 1:
             return values[0]
-        result = E.BoolExpression(op_mapping[expr_typename], _canonize_arguments(values))
+        result = E.BoolExpression(op_mapping[expr_typename], _canonicalize_arguments(values))
         # print(f'[{expr_typename}] result: {result}')
         return result
     return term
 
 
-def _canonize_single_argument(arg: Any, dtype: Optional[TypeBase] = None) -> Union[E.ObjectOrValueOutputExpression, E.VariableExpression, type(Ellipsis)]:
+def _canonicalize_single_argument(arg: Any, dtype: Optional[TypeBase] = None) -> Union[E.ObjectOrValueOutputExpression, E.VariableExpression, type(Ellipsis)]:
     if isinstance(arg, E.ObjectOrValueOutputExpression):
         return arg
     if isinstance(arg, (CrowControllerApplicationExpression, CrowBehaviorApplicationExpression, CrowGeneratorApplicationExpression)):
@@ -438,7 +453,7 @@ def _canonize_single_argument(arg: Any, dtype: Optional[TypeBase] = None) -> Uni
     raise ValueError(f'Invalid argument: {arg}. Type: {type(arg)}.')
 
 
-def _canonize_arguments_same_dtype(args: Optional[Union[ArgumentsList, tuple, list]] = None, dtype: Optional[TypeBase] = None) -> Tuple[Union[E.ValueOutputExpression, E.VariableExpression], ...]:
+def _canonicalize_arguments_same_dtype(args: Optional[Union[ArgumentsList, tuple, list]] = None, dtype: Optional[TypeBase] = None) -> Tuple[Union[E.ValueOutputExpression, E.VariableExpression], ...]:
     if args is None:
         return tuple()
     args = args.arguments if isinstance(args, ArgumentsList) else args
@@ -450,20 +465,20 @@ def _canonize_arguments_same_dtype(args: Optional[Union[ArgumentsList, tuple, li
                 dtype = arg.return_type
                 break
 
-    canonized_args = list()
+    canonicalized_args = list()
     for arg in args:
-        canonized_args.append(_canonize_single_argument(arg, dtype=dtype))
-    return tuple(canonized_args)
+        canonicalized_args.append(_canonicalize_single_argument(arg, dtype=dtype))
+    return tuple(canonicalized_args)
 
 
-def _canonize_arguments(args: Optional[Union[ArgumentsList, tuple, list]] = None, dtypes: Optional[Union[Sequence[TypeBase], TypeBase]] = None) -> Tuple[Union[E.ValueOutputExpression, E.VariableExpression], ...]:
+def _canonicalize_arguments(args: Optional[Union[ArgumentsList, tuple, list]] = None, dtypes: Optional[Union[Sequence[TypeBase], TypeBase]] = None) -> Tuple[Union[E.ValueOutputExpression, E.VariableExpression], ...]:
     if args is None:
         return tuple()
     if isinstance(dtypes, TypeBase):
         dtypes = [dtypes] * len(args)
 
     # TODO(Jiayuan Mao @ 2024/03/2): Strictly check the allowability of "Ellipsis" in the arguments.
-    canonized_args = list()
+    canonicalized_args = list()
 
     arguments = args.arguments if isinstance(args, ArgumentsList) else args
     if dtypes is not None:
@@ -472,10 +487,10 @@ def _canonize_arguments(args: Optional[Union[ArgumentsList, tuple, list]] = None
 
     for i, arg in enumerate(arguments):
         if arg is Ellipsis:
-            canonized_args.append(Ellipsis)
+            canonicalized_args.append(Ellipsis)
         else:
-            canonized_args.append(_canonize_single_argument(arg, dtype=dtypes[i] if dtypes is not None else None))
-    return tuple(canonized_args)
+            canonicalized_args.append(_canonicalize_single_argument(arg, dtype=dtypes[i] if dtypes is not None else None))
+    return tuple(canonicalized_args)
 
 
 def _safe_is_value_type(arg: Any) -> bool:
@@ -612,7 +627,7 @@ class CDLExpressionInterpreter(Interpreter):
         if self.domain.has_controller(name):
             controller = self.domain.get_controller(name)
             args: Optional[ArgumentsList] = self.visit(args)
-            args_c = _canonize_arguments(args, controller.argument_types)
+            args_c = _canonicalize_arguments(args, controller.argument_types)
             return CrowControllerApplicationExpression(controller, args_c, **annotations if annotations is not None else dict())
         else:
             raise KeyError(f'Controller {name} not found.')
@@ -646,37 +661,37 @@ class CDLExpressionInterpreter(Interpreter):
             return rv
         elif self.domain.has_feature(name):
             function = self.domain.get_feature(name)
-            args_c = _canonize_arguments(args, function.ftype.argument_types)
+            args_c = _canonicalize_arguments(args, function.ftype.argument_types)
             return E.FunctionApplicationExpression(function, args_c, **annotations)
         elif self.domain.has_function(name):
             function = self.domain.get_function(name)
-            args_c = _canonize_arguments(args, function.ftype.argument_types)
+            args_c = _canonicalize_arguments(args, function.ftype.argument_types)
             return E.FunctionApplicationExpression(function, args_c, **annotations)
         elif self.domain.has_controller(name):
             controller = self.domain.get_controller(name)
-            args_c = _canonize_arguments(args, controller.argument_types)
+            args_c = _canonicalize_arguments(args, controller.argument_types)
             return CrowControllerApplicationExpression(controller, args_c)
         elif self.domain.has_behavior(name):
             behavior = self.domain.get_behavior(name)
-            args_c = _canonize_arguments(args, behavior.argument_types)
+            args_c = _canonicalize_arguments(args, behavior.argument_types)
             if len(args_c) > 0 and args_c[-1] is Ellipsis:
                 args_c = args_c[:-1] + tuple([UnnamedPlaceholder(t) for t in behavior.argument_types[len(args_c) - 1:]])
             return CrowBehaviorApplicationExpression(behavior, args_c)
         elif self.domain.has_generator(name):
             generator = self.domain.get_generator(name)
-            args_c = _canonize_arguments(args, generator.argument_types)
+            args_c = _canonicalize_arguments(args, generator.argument_types)
             return CrowGeneratorApplicationExpression(generator, args_c, list())
         else:
             if 'inplace_behavior_body' in annotations and annotations['inplace_behavior_body']:
                 """Inplace definition of an function, used for define a __totally_ordered_plan__ function."""
-                args_c = _canonize_arguments(args)
+                args_c = _canonicalize_arguments(args)
                 argument_types = [arg.return_type for arg in args_c]
                 # logger.warning(f'Behavior {name} not found, creating a new one with argument types {argument_types}.')
                 predicate = self.domain.define_crow_function(name, argument_types, self.domain.get_type('__behavior_body__'))
                 return E.FunctionApplicationExpression(predicate, args_c)
             elif 'inplace_generator' in annotations and annotations['inplace_generator']:
                 """Inplace definition of an generator function. Typically this function is used together with the generator_placeholder annotation."""
-                args_c = _canonize_arguments(args)
+                args_c = _canonicalize_arguments(args)
                 argument_types = [arg.return_type for arg in args_c]
                 # logger.warning(f'Generator placeholder function {name} not found, creating a new one with argument types {argument_types}.')
 
@@ -708,17 +723,17 @@ class CDLExpressionInterpreter(Interpreter):
     @inline_args
     def atom_subscript(self, name: str, annotations: dict, index: Tree) -> Union[E.FunctionApplicationExpression]:
         """Captures subscript expressions such as `name[index1, index2, ...]`."""
-        feature = self.domain.get_feature(name)
+        feature = self.domain.get_feature(name, allow_function=True)
         index: CSList = self.visit(index)
         annotations: Optional[dict] = self.visit(annotations)
-        if not feature.is_state_variable:
-            raise ValueError(f'Invalid subscript expression: {name} is not a state variable. Expression: {name}[{index.items}]')
+        if not feature.is_cacheable:
+            raise ValueError(f'Invalid subscript expression: {name} is not a cacheable feature. Expression: {name}[{index.items}]')
         if annotations is None:
             annotations = dict()
         items = index.items
         if len(items) == 1 and items[0] is Ellipsis:
             return E.FunctionApplicationExpression(feature, tuple())
-        arguments = _canonize_arguments(index.items, dtypes=feature.ftype.argument_types)
+        arguments = _canonicalize_arguments(index.items, dtypes=feature.ftype.argument_types)
         return E.FunctionApplicationExpression(feature, arguments, **annotations)
 
     @inline_args
@@ -776,7 +791,7 @@ class CDLExpressionInterpreter(Interpreter):
             if not _safe_is_value_type(values[i - 1]) and not _safe_is_value_type(values[i + 1]):
                 results.append(E.ObjectCompareExpression(E.CompareOpType.from_string(values[i][0].value), values[i - 1], values[i + 1]))
             elif _safe_is_value_type(values[i - 1]) and _safe_is_value_type(values[i + 1]):
-                v1, v2 = _canonize_arguments_same_dtype([values[i - 1], values[i + 1]])
+                v1, v2 = _canonicalize_arguments_same_dtype([values[i - 1], values[i + 1]])
                 results.append(E.ValueCompareExpression(E.CompareOpType.from_string(values[i][0].value), v1, v2))
             else:
                 raise ValueError(f'Invalid comparison: {values[i - 1]} vs {values[i + 1]}')
@@ -787,14 +802,14 @@ class CDLExpressionInterpreter(Interpreter):
 
     @inline_args
     def not_test(self, value: Any) -> E.NotExpression:
-        return E.NotExpression(*_canonize_arguments([self.visit(value)], BOOL))
+        return E.NotExpression(*_canonicalize_arguments([self.visit(value)], BOOL))
 
     @inline_args
     def and_test(self, *values: Any) -> E.AndExpression:
         values = [self.visit(value) for value in values]
         if len(values) == 1:
             return values[0]
-        result = E.AndExpression(*_canonize_arguments(values, BOOL))
+        result = E.AndExpression(*_canonicalize_arguments(values, BOOL))
         return result
 
     @inline_args
@@ -802,13 +817,13 @@ class CDLExpressionInterpreter(Interpreter):
         values = [self.visit(value) for value in values]
         if len(values) == 1:
             return values[0]
-        result = E.OrExpression(*_canonize_arguments(values, BOOL))
+        result = E.OrExpression(*_canonicalize_arguments(values, BOOL))
         return result
 
     @inline_args
     def cond_test(self, value1: Any, cond: Any, value2: Any) -> E.ConditionExpression:
-        x, y = _canonize_arguments_same_dtype([self.visit(value1), self.visit(value2)])
-        return E.ConditionExpression(_canonize_single_argument(self.visit(cond), BOOL), x, y)
+        x, y = _canonicalize_arguments_same_dtype([self.visit(value1), self.visit(value2)])
+        return E.ConditionExpression(_canonicalize_single_argument(self.visit(cond), BOOL), x, y)
 
     @inline_args
     def test(self, value: Any):
@@ -830,7 +845,7 @@ class CDLExpressionInterpreter(Interpreter):
         if all(isinstance(v, (int, float)) for v in values):
             return E.ConstantExpression(TensorValue.from_values(*values))
         else:
-            return E.ListCreationExpression(_canonize_arguments(values))
+            return E.ListCreationExpression(_canonicalize_arguments(values))
 
     @inline_args
     def cs_list(self, *values: Any):
@@ -855,11 +870,11 @@ class CDLExpressionInterpreter(Interpreter):
         # NB(Jiayuan Mao @ 2024/06/21): for handling string literals as docs.
         if isinstance(value, str):
             return None
-        return FunctionCall('expr', ArgumentsList((_canonize_single_argument(value),)))
+        return FunctionCall('expr', ArgumentsList((_canonicalize_single_argument(value),)))
 
     @inline_args
     def expr_list_expansion_stmt(self, value: Any):
-        value = _canonize_single_argument(self.visit(value))
+        value = _canonicalize_single_argument(self.visit(value))
         return FunctionCall('expr', ArgumentsList((E.ListExpansionExpression(value), )))
 
     @inline_args
@@ -869,7 +884,7 @@ class CDLExpressionInterpreter(Interpreter):
             return None
         if isinstance(value, str):
             return None
-        return FunctionCall('expr', ArgumentsList((_canonize_single_argument(value),)))
+        return FunctionCall('expr', ArgumentsList((_canonicalize_single_argument(value),)))
 
     def _make_additive_assign_stmt(self, lv, rv, op: str, annotations: dict):
         if op == '=':
@@ -902,24 +917,24 @@ class CDLExpressionInterpreter(Interpreter):
         if target.data == 'atom_varname':
             target_lv = target.children[0]
         else:
-            target_lv = _canonize_single_argument(self.visit(target))  # left value
+            target_lv = _canonicalize_single_argument(self.visit(target))  # left value
 
         if isinstance(target_lv, str):
             if target_lv in self.local_variables:
                 annotations.setdefault('local', True)
                 target_lv = self.local_variables[target_lv]
-                target_rv = _canonize_single_argument(self.visit(value))
+                target_rv = _canonicalize_single_argument(self.visit(value))
                 # return FunctionCall('assign', ArgumentsList((target_lv, target_rv)), annotations)
                 return self._make_additive_assign_stmt(target_lv, target_rv, op, annotations)
             else:
                 if target_lv in self.domain.features and self.domain.get_feature(target_lv).nr_arguments == 0:
                     target_lv = E.FunctionApplicationExpression(self.domain.get_feature(target_lv), tuple())
-                    # return FunctionCall('assign', ArgumentsList((target_lv, _canonize_single_argument(self.visit(value)))), annotations)
-                    return self._make_additive_assign_stmt(target_lv, _canonize_single_argument(self.visit(value)), op, annotations)
+                    # return FunctionCall('assign', ArgumentsList((target_lv, _canonicalize_single_argument(self.visit(value)))), annotations)
+                    return self._make_additive_assign_stmt(target_lv, _canonicalize_single_argument(self.visit(value)), op, annotations)
                 else:
                     raise NameError(f'Invalid assignment target: it is not a local variable and not a feature with 0 arguments: {target_lv}')
-        # return FunctionCall('assign', ArgumentsList((target_lv, _canonize_single_argument(self.visit(value)))), annotations)
-        return self._make_additive_assign_stmt(target_lv, _canonize_single_argument(self.visit(value)), op, annotations)
+        # return FunctionCall('assign', ArgumentsList((target_lv, _canonicalize_single_argument(self.visit(value)))), annotations)
+        return self._make_additive_assign_stmt(target_lv, _canonicalize_single_argument(self.visit(value)), op, annotations)
 
     @inline_args
     def assign_stmt(self, target: Any, op: Any, value: Any):
@@ -933,7 +948,7 @@ class CDLExpressionInterpreter(Interpreter):
     def let_assign_stmt(self, target: str, dtype: Any = None, value: Any = None):
         assert isinstance(target, str), f'Invalid local variable name: {target}'
         dtype = self.visit(dtype)
-        value = _canonize_single_argument(self.visit(value))
+        value = _canonicalize_single_argument(self.visit(value))
         if dtype is not None:
             dtype = self.domain.get_type(dtype)
             if value is not None:
@@ -950,7 +965,7 @@ class CDLExpressionInterpreter(Interpreter):
     @inline_args
     def symbol_assign_stmt(self, target: str, value: Any):
         assert isinstance(target, str), f'Invalid symbol variable name: {target}'
-        value = _canonize_single_argument(self.visit(value))
+        value = _canonicalize_single_argument(self.visit(value))
         if target in self.local_variables:
             raise RuntimeError(f'Local symbol variable {target} has been assigned before.')
         self.local_variables[target] = E.VariableExpression(Variable(target, value.return_type))
@@ -968,37 +983,37 @@ class CDLExpressionInterpreter(Interpreter):
 
     @inline_args
     def achieve_once_stmt(self, value: CSList):
-        return FunctionCall('achieve', ArgumentsList(_canonize_arguments(self.visit(value).items, BOOL)), {'once': True})
+        return FunctionCall('achieve', ArgumentsList(_canonicalize_arguments(self.visit(value).items, BOOL)), {'once': True})
 
     @inline_args
     def achieve_hold_stmt(self, value: CSList):
-        return FunctionCall('achieve', ArgumentsList(_canonize_arguments(self.visit(value).items, BOOL)), {'once': False})
+        return FunctionCall('achieve', ArgumentsList(_canonicalize_arguments(self.visit(value).items, BOOL)), {'once': False})
 
     @inline_args
     def pachieve_once_stmt(self, value: CSList):
-        return FunctionCall('pachieve', ArgumentsList(_canonize_arguments(self.visit(value).items, BOOL)), {'once': True})
+        return FunctionCall('pachieve', ArgumentsList(_canonicalize_arguments(self.visit(value).items, BOOL)), {'once': True})
 
     @inline_args
     def pachieve_hold_stmt(self, value: CSList):
-        return FunctionCall('pachieve', ArgumentsList(_canonize_arguments(self.visit(value).items, BOOL)), {'once': False})
+        return FunctionCall('pachieve', ArgumentsList(_canonicalize_arguments(self.visit(value).items, BOOL)), {'once': False})
 
     @inline_args
     def untrack_stmt(self, value: CSList):
         if value is None:
             return FunctionCall('untrack', ArgumentsList(tuple()))
-        return FunctionCall('untrack', ArgumentsList(_canonize_arguments(self.visit(value).items, BOOL)))
+        return FunctionCall('untrack', ArgumentsList(_canonicalize_arguments(self.visit(value).items, BOOL)))
 
     @inline_args
     def assert_once_stmt(self, value: Any):
-        return FunctionCall('assert', ArgumentsList((_canonize_single_argument(self.visit(value), BOOL), )), {'once': True})
+        return FunctionCall('assert', ArgumentsList((_canonicalize_single_argument(self.visit(value), BOOL), )), {'once': True})
 
     @inline_args
     def assert_hold_stmt(self, value: Any):
-        return FunctionCall('assert', ArgumentsList((_canonize_single_argument(self.visit(value), BOOL), )), {'once': False})
+        return FunctionCall('assert', ArgumentsList((_canonicalize_single_argument(self.visit(value), BOOL), )), {'once': False})
 
     @inline_args
     def return_stmt(self, value: Any):
-        return FunctionCall('return', ArgumentsList((_canonize_single_argument(self.visit(value)), )))
+        return FunctionCall('return', ArgumentsList((_canonicalize_single_argument(self.visit(value)), )))
 
     @inline_args
     def ordered_suite(self, ordering_op: Any, body: Any):
@@ -1020,7 +1035,7 @@ class CDLExpressionInterpreter(Interpreter):
 
     @inline_args
     def if_stmt(self, cond: Any, suite: Any, else_suite: Optional[Any] = None):
-        cond = _canonize_single_argument(self.visit(cond))
+        cond = _canonicalize_single_argument(self.visit(cond))
         with self.local_variable_guard():
             suite = self.visit(suite)
         if else_suite is None:
@@ -1062,7 +1077,7 @@ class CDLExpressionInterpreter(Interpreter):
 
     @inline_args
     def while_stmt(self, cond: Any, suite: Any):
-        cond = _canonize_single_argument(self.visit(cond))
+        cond = _canonicalize_single_argument(self.visit(cond))
         with self.local_variable_guard():
             suite = self.visit(suite)
         return FunctionCall('while', ArgumentsList((cond, suite)))
@@ -1082,6 +1097,10 @@ class CDLExpressionInterpreter(Interpreter):
     @inline_args
     def exists_test(self, cs_list: Any, suite: Any):
         return self._quantification_expression(cs_list, suite, E.ExistsExpression)
+
+    @inline_args
+    def batched_test(self, cs_list: Any, suite: Any):
+        return self._quantification_expression(cs_list, suite, E.BatchedExpression)
 
     @inline_args
     def findall_test(self, variable: Variable, suite: Any):
@@ -1136,6 +1155,10 @@ class CDLExpressionInterpreter(Interpreter):
         for item in cs_list.items:
             self.local_variables[item.name] = E.VariableExpression(item)
         return FunctionCall('bind', ArgumentsList((cs_list, E.NullExpression(BOOL))))
+
+    @inline_args
+    def mem_query_stmt(self, expression: Any):
+        return FunctionCall('mem_query', ArgumentsList((_canonicalize_single_argument(self.visit(expression)), )))
 
     @inline_args
     def annotated_compound_stmt(self, annotations: dict, stmt: Any):

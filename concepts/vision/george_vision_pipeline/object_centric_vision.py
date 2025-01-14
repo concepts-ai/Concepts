@@ -30,7 +30,7 @@ __all__ = [
     'CameraTransformation', 'ObjectDetectionResult', 'ObjectCentricVisionPipeline',
     'get_pointcloud', 'get_pointcloud_multicam', 'filter_pointcloud_range', 'ransac_table_detection', 'threshold_table_detection',
     'project_pointcloud_to_plane', 'object_reconstruction_by_extrusion', 'remove_outliers', 'mesh_reconstruction_alpha_shape',
-    'canonize_mesh_center_', 'compute_transformation_from_plane_equation', 'visualize_with_camera_matrix',
+    'canonicalize_mesh_center_', 'compute_transformation_from_plane_equation', 'visualize_with_camera_matrix',
     'load_scene_in_pybullet',
 ]
 
@@ -519,7 +519,7 @@ class ObjectCentricVisionPipeline(object):
             metainfo['objects'].append(det_metainfo)
             o3d.io.write_point_cloud(osp.join(output_dir, det_metainfo['pcd']), detection.pcd)
             mesh = detection.reconstructed_mesh
-            mesh, center = canonize_mesh_center_(mesh)
+            mesh, center = canonicalize_mesh_center_(mesh)
             det_metainfo['pos'] = center.tolist()
             o3d.io.write_triangle_mesh(osp.join(output_dir, det_metainfo['mesh']), mesh)
             o3d.io.write_triangle_mesh(osp.join(output_dir, det_metainfo['mesh_obj']), mesh, write_triangle_uvs=True)
@@ -1049,8 +1049,8 @@ def compute_iou_3d(bbox1: o3d.geometry.AxisAlignedBoundingBox, bbox2: o3d.geomet
     return intersection_volume / union_volume
 
 
-def canonize_mesh_center_(mesh_: o3d.geometry.TriangleMesh) -> Tuple[o3d.geometry.TriangleMesh, np.ndarray]:
-    """Canonize the mesh center. Note that this function modifies the mesh in place.
+def canonicalize_mesh_center_(mesh_: o3d.geometry.TriangleMesh) -> Tuple[o3d.geometry.TriangleMesh, np.ndarray]:
+    """canonicalize the mesh center. Note that this function modifies the mesh in place.
 
     Args:
         mesh_: an open3d triangle mesh.

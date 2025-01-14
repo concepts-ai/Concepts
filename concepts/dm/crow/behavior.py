@@ -23,7 +23,7 @@ from concepts.dm.crow.controller import CrowControllerApplicationExpression
 from concepts.dm.crow.crow_generator import CrowGeneratorApplicationExpression
 
 __all__ = [
-    'CrowBehaviorBodyPrimitiveBase', 'CrowBehaviorCommit', 'CrowAchieveExpression', 'CrowUntrackExpression', 'CrowBindExpression', 'CrowAssertExpression', 'CrowRuntimeAssignmentExpression', 'CrowFeatureAssignmentExpression',
+    'CrowBehaviorBodyPrimitiveBase', 'CrowBehaviorCommit', 'CrowAchieveExpression', 'CrowUntrackExpression', 'CrowMemQueryExpression', 'CrowBindExpression', 'CrowAssertExpression', 'CrowRuntimeAssignmentExpression', 'CrowFeatureAssignmentExpression',
     'CrowBehaviorBodySuiteBase', 'CrowBehaviorConditionSuite', 'CrowBehaviorWhileLoopSuite', 'CrowBehaviorForeachLoopSuite', 'CrowBehaviorStatementOrdering', 'CrowBehaviorOrderingSuite',
     'CrowBehaviorBodyItem', 'CrowBehavior', 'CrowBehaviorApplier', 'CrowBehaviorApplicationExpression', 'CrowBehaviorEffectApplicationExpression',
     'CrowEffectApplier'
@@ -36,6 +36,7 @@ CrowBehaviorBodyItem = Union[
     'CrowUntrackExpression',
     'CrowAssertExpression',
     'CrowBindExpression',
+    'CrowMemQueryExpression',
     'CrowControllerApplicationExpression',
     'CrowRuntimeAssignmentExpression',
     'CrowFeatureAssignmentExpression',
@@ -52,12 +53,12 @@ class CrowBehaviorBodyPrimitiveBase(object):
 
 
 class CrowBehaviorCommit(CrowBehaviorBodyPrimitiveBase):
-    def __init__(self, sketch: bool = False, csp: bool = False, behavior: bool = False):
+    def __init__(self, sketch: bool = True, csp: bool = True, execution: bool = False):
         self.sketch = sketch
         self.csp = csp
-        self.behavior = behavior
+        self.execution = execution
 
-    behavior: bool
+    execution: bool
     """Whether to commit the execution: the execution is always going to achieve the subgoal."""
 
     sketch: bool
@@ -68,7 +69,7 @@ class CrowBehaviorCommit(CrowBehaviorBodyPrimitiveBase):
 
     @property
     def flags(self):
-        return dict(sketch=self.sketch, csp=self.csp, behavior=self.behavior)
+        return dict(sketch=self.sketch, csp=self.csp, execution=self.execution)
 
     @property
     def flags_str(self):
@@ -79,6 +80,10 @@ class CrowBehaviorCommit(CrowBehaviorBodyPrimitiveBase):
 
     def __repr__(self):
         return str(self)
+
+    @classmethod
+    def execution_only(cls):
+        return cls(sketch=False, csp=False, execution=True)
 
 
 class CrowAchieveExpression(CrowBehaviorBodyPrimitiveBase):
@@ -199,6 +204,20 @@ class CrowBindExpression(CrowBehaviorBodyPrimitiveBase):
         return str(self)
 
 
+class CrowMemQueryExpression(CrowBehaviorBodyPrimitiveBase):
+    def __init__(self, query: ObjectOrValueOutputExpression):
+        self.query = query
+
+    query: ObjectOrValueOutputExpression
+    """The query to be executed."""
+
+    def __str__(self):
+        return f'MemQuery({self.query})'
+
+    def __repr__(self):
+        return str(self)
+
+
 class CrowRuntimeAssignmentExpression(CrowBehaviorBodyPrimitiveBase):
     def __init__(self, variable: Variable, value: ObjectOrValueOutputExpression):
         self.variable = variable
@@ -218,10 +237,11 @@ class CrowRuntimeAssignmentExpression(CrowBehaviorBodyPrimitiveBase):
 
 
 class CrowFeatureAssignmentExpression(CrowBehaviorBodyPrimitiveBase):
-    def __init__(self, feature: Union[FunctionApplicationExpression], value: Union[ObjectOrValueOutputExpression, NullExpression], simulation: bool = False, execution: bool = False):
+    def __init__(self, feature: Union[FunctionApplicationExpression], value: Union[ObjectOrValueOutputExpression, NullExpression], simulation: bool = False, execution: bool = False, vision_update: bool = False):
         self.feature = feature
         self.value = value
         self.evaluation_mode = CrowFunctionEvaluationMode.from_bools(simulation=simulation, execution=execution)
+        self.vision_update = vision_update
 
     feature: Union[FunctionApplicationExpression]
     """The feature to assign."""
@@ -232,8 +252,24 @@ class CrowFeatureAssignmentExpression(CrowBehaviorBodyPrimitiveBase):
     evaluation_mode: CrowFunctionEvaluationMode
     """The evaluation mode of the assignment."""
 
+    vision_update: bool
+    """Whether the feature assignment should be override by visual perception during execution time."""
+
     def __str__(self):
+
         return f'AssignFeature{self.evaluation_mode.get_prefix()}({self.feature} <- {self.value})'
+
+    def get_prefix(self) -> str:
+        tags = list()
+        if self.evaluation_mode == CrowFunctionEvaluationMode.FUNCTIONAL:
+            pass
+        else:
+            tags.append(self.evaluation_mode.get_short_name())
+        if self.vision_update:
+            tags.append('vision_update')
+        if len(tags) == 0:
+            return ''
+        return f'[{", ".join(tags)}]'
 
     def __repr__(self):
         return str(self)
@@ -564,7 +600,8 @@ class CrowBehavior(object):
         effect_body: Optional[CrowBehaviorOrderingSuite] = None,
         heuristic: Optional[CrowBehaviorOrderingSuite] = None,
         minimize: Optional[ValueOutputExpression] = None,
-        always: bool = True
+        always: bool = False,
+        python_effect: bool = False
     ):
         """Initialize a new behavior.
 
@@ -576,6 +613,8 @@ class CrowBehavior(object):
             effect_body: the body of the effects.
             heuristic: the heuristic of the behavior.
             minimize: the expression to minimize.
+            always: whether the behavior is always feasible (it can always achieve the specified goal in any states). Legacy option and unused.
+            python_effect: whether the effect is declared in Python.
         """
         self.name = name
         self.arguments = tuple(arguments)
@@ -585,6 +624,7 @@ class CrowBehavior(object):
         self.heuristic = heuristic
         self.minimize = minimize
         self.always = always
+        self.python_effect = python_effect
 
         self._check_body()
 
@@ -610,7 +650,10 @@ class CrowBehavior(object):
     """The expression to minimize."""
 
     always: bool
-    """Whether the behavior is always feasible."""
+    """Whether the behavior is always feasible (it can always achieve the specified goal in any states)."""
+
+    python_effect: bool
+    """Whether the effect is declared in Python."""
 
     @property
     def argument_names(self) -> Tuple[str, ...]:
@@ -645,7 +688,7 @@ class CrowBehavior(object):
             expected_promotable_body_position = None
 
         for i, item in enumerate(body):
-            if isinstance(item, (CrowBindExpression, CrowRuntimeAssignmentExpression, CrowAssertExpression, CrowControllerApplicationExpression)):
+            if isinstance(item, (CrowBindExpression, CrowMemQueryExpression, CrowRuntimeAssignmentExpression, CrowAssertExpression, CrowControllerApplicationExpression)):
                 continue
             elif isinstance(item, (CrowAchieveExpression, CrowUntrackExpression)):
                 pass
@@ -673,8 +716,8 @@ class CrowBehavior(object):
                 self._check_promotable_body(item.statements)
             elif isinstance(item, CrowBehaviorOrderingSuite) and item.order == CrowBehaviorStatementOrdering.CRITICAL:
                 self._check_critical_body(item.statements)
-            elif isinstance(item, CrowBehaviorForeachLoopSuite):
-                raise ValueError(f'Foreach loop is not allowed in the promotable body.')
+            # elif isinstance(item, CrowBehaviorForeachLoopSuite):
+            #     raise ValueError(f'Foreach loop is not allowed in the promotable body.')
             elif isinstance(item, CrowBehaviorWhileLoopSuite):
                 raise ValueError(f'While loop is not allowed in the promotable body.')
             elif isinstance(item, CrowBehaviorConditionSuite):
@@ -697,8 +740,8 @@ class CrowBehavior(object):
                 self._check_critical_body(item.statements)
             elif isinstance(item, CrowBehaviorOrderingSuite) and item.order == CrowBehaviorStatementOrdering.PROMOTABLE:
                 raise ValueError(f'Promotable body can not be used inside the critical body.')
-            elif isinstance(item, CrowBehaviorForeachLoopSuite):
-                raise ValueError(f'Foreach loop is not allowed in the critical body.')
+            # elif isinstance(item, CrowBehaviorForeachLoopSuite):
+            #     raise ValueError(f'Foreach loop is not allowed in the critical body.')
             elif isinstance(item, CrowBehaviorWhileLoopSuite):
                 raise ValueError(f'While loop is not allowed in the critical body.')
             elif isinstance(item, CrowBehaviorConditionSuite):
@@ -719,8 +762,12 @@ class CrowBehavior(object):
         return f'{self.name}({", ".join(map(str, self.arguments))})'
 
     def long_str(self):
+        flag_string = ''
+        if self.python_effect:
+            flag_string = '[[python_effect]]'
+
         effect_string = '\n'.join(map(str, self.effect_body.statements))
-        fmt = f'behavior {self.name}[always={self.always}]({", ".join(map(str, self.arguments))}):\n'
+        fmt = f'behavior {flag_string}{self.name}({", ".join(map(str, self.arguments))}):\n'
         fmt += f'  goal: {indent_text(str(self.goal)).lstrip()}\n'
         fmt += f'  body:\n{indent_text(str(self.body), 2)}\n'
         if len(effect_string) > 0:
@@ -828,9 +875,16 @@ class CrowEffectApplier(object):
         self.statements = tuple(statements)
         self.bounded_variables = bounded_variables
 
-    def __str__(self):
+
+    def long_str(self):
+        return self.short_str()
+
+    def short_str(self):
         from concepts.dm.crow.behavior_utils import format_behavior_program
         fmt = format_behavior_program(CrowBehaviorOrderingSuite.make_sequential(self.statements, variable_scope_identifier=0), {0: self.bounded_variables})
         return f'effect_apply{{\n{indent_text(fmt)}\n}}'
+
+    def __str__(self):
+        return self.short_str()
 
     __repr__ = repr_from_str

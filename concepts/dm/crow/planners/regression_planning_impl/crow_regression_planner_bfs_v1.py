@@ -24,7 +24,7 @@ from concepts.dm.crow.behavior_utils import match_applicable_behaviors, execute_
 from concepts.dm.crow.executors.crow_executor import CrowExecutor
 
 from concepts.dm.crow.planners.regression_planning import CrowPlanningResult, CrowRegressionPlanner, ScopedCrowExpression
-from concepts.dm.crow.planners.regression_utils import canonize_bounded_variables, split_simple_sequential
+from concepts.dm.crow.planners.regression_utils import canonicalize_bounded_variables, split_simple_sequential
 from concepts.dm.crow.planners.regression_planning_impl.crow_regression_planner_dfs_v1_utils import execute_behavior_effect
 
 __all__ = ['CrowRegressionPlannerBFSv1']
@@ -160,31 +160,31 @@ def execute_statements(executor: CrowExecutor, init_results: Sequence[CrowPlanni
 
         try:
             # Invalid ordering of find statement.
-            bounded_variables = canonize_bounded_variables(results[0].scopes, scope_id)
+            bounded_variables = canonicalize_bounded_variables(results[0].scopes, scope_id)
         except KeyError:
             return list()
 
         if isinstance(stmt, CrowAssertExpression):
             for result in results:
-                rv = executor.execute(stmt.bool_expr, state=result.state, bounded_variables=canonize_bounded_variables(result.scopes, scope_id))
+                rv = executor.execute(stmt.bool_expr, state=result.state, bounded_variables=canonicalize_bounded_variables(result.scopes, scope_id))
                 if bool(rv.item()):
                     new_results.append(result)
         elif isinstance(stmt, CrowControllerApplicationExpression):
             for result in results:
-                argument_values = [executor.execute(x, state=result.state, bounded_variables=canonize_bounded_variables(result.scopes, scope_id)) for x in stmt.arguments]
+                argument_values = [executor.execute(x, state=result.state, bounded_variables=canonicalize_bounded_variables(result.scopes, scope_id)) for x in stmt.arguments]
                 for i, argv in enumerate(argument_values):
                     if isinstance(argv, StateObjectReference):
                         argument_values[i] = argv.name
                 new_results.append(CrowPlanningResult(result.state, result.csp, result.controller_actions + (CrowControllerApplier(stmt.controller, argument_values),), result.scopes))
         elif isinstance(stmt, CrowBindExpression):
             for result in results:
-                for new_scope in execute_object_bind(executor, stmt, result.state, canonize_bounded_variables(result.scopes, scope_id)):
+                for new_scope in execute_object_bind(executor, stmt, result.state, canonicalize_bounded_variables(result.scopes, scope_id)):
                     # print('!!!Object binding result:', new_scope)
                     new_scopes = result.scopes.copy()
                     new_scopes[scope_id] = new_scope
                     new_results.append(CrowPlanningResult(result.state, result.csp, result.controller_actions, new_scopes))
         elif isinstance(stmt, CrowBehavior):
-            new_results = [execute_behavior_effect(executor, stmt, result.state, canonize_bounded_variables(result.scopes, scope_id)) for result in results]
+            new_results = [execute_behavior_effect(executor, stmt, result.state, canonicalize_bounded_variables(result.scopes, scope_id)) for result in results]
         else:
             raise ValueError(f'Unknown statement type: {stmt}')
         results = new_results

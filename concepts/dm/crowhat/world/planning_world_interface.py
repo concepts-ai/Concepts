@@ -12,14 +12,15 @@ import contextlib
 from typing import Any, Optional, Union, Iterator, Tuple, List, NamedTuple
 
 import numpy as np
+
 from concepts.utils.typing_utils import Open3DPointCloud, Open3DTriangleMesh, Trimesh, Vec3f, Vec4f
 
 
 class GeometricContactInfo(NamedTuple):
-    body_a: int
-    body_b: int
-    link_a: int
-    link_b: int
+    body_a: Union[str, int]
+    body_b: Union[str, int]
+    link_a: Union[str, int]
+    link_b: Union[str, int]
     position_on_a: Vec3f
     position_on_b: Vec3f
     contact_normal_on_a: Vec3f
@@ -28,10 +29,10 @@ class GeometricContactInfo(NamedTuple):
 
 
 class AttachmentInfo(NamedTuple):
-    body_a: int
-    body_b: int
-    link_a: int
-    link_b: int
+    body_a: Union[str, int]
+    body_b: Union[str, int]
+    link_a: Union[str, int]
+    link_b: Union[str, int]
     a_to_b: Tuple[Vec3f, Vec4f]
 
 
@@ -87,7 +88,7 @@ class PlanningWorldInterface(object):
     def _set_object_pose(self, identifier: Union[str, int], pose: Tuple[Vec3f, Vec4f]):
         raise NotImplementedError()
 
-    def get_link_pose(self, body_id: int, link_id: int) -> Tuple[Vec3f, Vec4f]:
+    def get_link_pose(self, body_id: Union[str, int], link_id: Union[str, int]) -> Tuple[Vec3f, Vec4f]:
         """Get the pose of the link with the given body and link identifiers.
 
         Args:
@@ -99,10 +100,10 @@ class PlanningWorldInterface(object):
         """
         return self._get_link_pose(body_id, link_id)
 
-    def _get_link_pose(self, body_id: int, link_id: int) -> Tuple[Vec3f, Vec4f]:
+    def _get_link_pose(self, body_id: Union[str, int], link_id: Union[str, int]) -> Tuple[Vec3f, Vec4f]:
         raise NotImplementedError()
 
-    def add_attachment(self, a: Union[str, int], a_link: int, b: Union[str, int], b_link: int, a_to_b: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
+    def add_attachment(self, a: Union[str, int], a_link: Union[str, int], b: Union[str, int], b_link: Union[str, int], a_to_b: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
         """Set the attachment between object a and object b. This is an optional functionality that can be implemented in subclasses
 
         Args:
@@ -117,10 +118,10 @@ class PlanningWorldInterface(object):
         """
         return self._add_attachment(a, a_link, b, b_link, a_to_b)
 
-    def _add_attachment(self, a: Union[str, int], a_link: int, b: Union[str, int], b_link: int, a_to_b: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
+    def _add_attachment(self, a: Union[str, int], a_link: Union[str, int], b: Union[str, int], b_link: Union[str, int], a_to_b: Optional[Tuple[Vec3f, Vec4f]] = None) -> Any:
         raise NotImplementedError()
 
-    def remove_attachment(self, a: Union[str, int], a_link: int, b: Union[str, int], b_link: int):
+    def remove_attachment(self, a: Union[str, int], a_link: Union[str, int], b: Union[str, int], b_link: Union[str, int]):
         """Remove the attachment between object a and object b. This is an optional functionality that can be implemented in subclasses.
 
         Args:
@@ -131,7 +132,7 @@ class PlanningWorldInterface(object):
         """
         self._remove_attachment(a, a_link, b, b_link)
 
-    def _remove_attachment(self, a: Union[str, int], a_link: int, b: Union[str, int], b_link: int):
+    def _remove_attachment(self, a: Union[str, int], a_link: Union[str, int], b: Union[str, int], b_link: Union[str, int]):
         raise NotImplementedError()
 
     def get_object_mesh(self, identifier: Union[str, int], mode: str = 'open3d', **kwargs) -> Union[Open3DTriangleMesh, Trimesh]:
@@ -163,7 +164,7 @@ class PlanningWorldInterface(object):
     def _get_object_point_cloud(self, identifier: Union[str, int], **kwargs) -> Open3DPointCloud:
         raise NotImplementedError()
 
-    def get_contact_points(self, a: Optional[Union[str, int]] = None, b: Optional[Union[str, int]] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None) -> List[GeometricContactInfo]:
+    def get_contact_points(self, a: Optional[Union[str, int]] = None, b: Optional[Union[str, int]] = None, max_distance: Optional[float] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None) -> List[GeometricContactInfo]:
         """Get the contact points of the object between a and b, which are the identifiers of two objects. If either a or b is None, it will return the contact
         points of the object with the given identifier. When both a and b are None, it will return all the contact points in the world.
 
@@ -175,12 +176,12 @@ class PlanningWorldInterface(object):
         Returns:
             a list of contact points.
         """
-        return self._get_contact_points(a, b, ignored_collision_bodies=ignored_collision_bodies)
+        return self._get_contact_points(a, b, max_distance=max_distance, ignored_collision_bodies=ignored_collision_bodies)
 
-    def _get_contact_points(self, a: Optional[Union[str, int]] = None, b: Optional[Union[str, int]] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None) -> List[GeometricContactInfo]:
+    def _get_contact_points(self, a: Optional[Union[str, int]] = None, b: Optional[Union[str, int]] = None, max_distance: Optional[float] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None) -> List[GeometricContactInfo]:
         raise NotImplementedError()
 
-    def check_collision(self, a: Optional[Union[str, int]] = None, b: Optional[Union[str, int]] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None) -> bool:
+    def check_collision(self, a: Optional[Union[str, int]] = None, b: Optional[Union[str, int]] = None, ignored_collision_bodies: Optional[List[Union[str, int]]] = None, max_distance: Optional[float] = None) -> bool:
         """Check if there is a collision between the object with the given identifiers.
 
         Args:
@@ -191,27 +192,52 @@ class PlanningWorldInterface(object):
         Returns:
             True if there is a collision, False otherwise.
         """
-        return len(self.get_contact_points(a, b, ignored_collision_bodies=ignored_collision_bodies)) > 0
+        return len(self.get_contact_points(a, b, ignored_collision_bodies=ignored_collision_bodies, max_distance=max_distance)) > 0
 
-    def check_collision_with_other_objects(self, object_id: int, ignore_self_collision: bool = True, ignored_collision_bodies: Optional[List[Union[str, int]]] = None, return_list: bool = False) -> Union[bool, List[int]]:
+    def check_collision_with_other_objects(
+        self,
+        object_id: Union[str, int],
+        ignore_self_collision: bool = True,
+        ignored_collision_bodies: Optional[List[Union[str, int]]] = None,
+        max_distance: Optional[float] = None,
+        return_list: bool = False, verbose: bool = False
+    ) -> Union[bool, List[Union[str, int]]]:
         """Check if there is a collision between the object with the given identifier and other objects.
 
         Args:
             object_id: the identifier of the object.
             ignore_self_collision: whether to ignore the collision between the object and itself.
             ignored_collision_bodies: a list of identifiers of the bodies to ignore.
+            max_distance: the maximum distance to consider a collision.
             return_list: whether to return the list of identifiers of the colliding objects.
 
         Returns:
             True if there is a collision, False otherwise. If return_list is True, it will return the list of identifiers of the colliding objects.
         """
-        contacts = self.get_contact_points(a=object_id)
+        # print(f'check_collision_with_other_objects a={object_id}, max_distance={max_distance}')
+        contacts = self.get_contact_points(a=object_id, max_distance=max_distance)
         if ignore_self_collision:
             contacts = [c for c in contacts if c.body_b != object_id]
         if ignored_collision_bodies is not None:
             contacts = [c for c in contacts if c.body_b not in ignored_collision_bodies]
         if return_list:
             return [c.body_b for c in contacts]
+
+        if verbose:
+            for c in contacts:
+                print(f'Collision between {c.body_a} / {c.link_a} and {c.body_b} / {c.link_b}.')
+        if False:
+            import jacinle
+            from concepts.simulator.pybullet.client import BulletClient
+            client: BulletClient = self.client
+            collisions = list()
+            for c in contacts:
+                name1 = client.world.get_link_name(c.body_a, c.link_a)
+                name2 = client.world.get_link_name(c.body_b, c.link_b)
+                collisions.append((name1, name2, c.contact_distance))
+            if len(collisions) > 0:
+                print(jacinle.tabulate(collisions, headers=['Object 1', 'Object 2', 'Distance']))
+
         return len(contacts) > 0
 
     def check_collision_pairs(self, pairs: List[Tuple[Union[str, int], Union[str, int]]], ignored_collision_bodies: Optional[List[Union[str, int]]] = None) -> bool:
@@ -230,11 +256,11 @@ class PlanningWorldInterface(object):
                 return True
         return False
 
-    def get_single_contact_normal(self, object_id: int, support_object_id: int, deviation_tol: float = 0.05, return_center: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    def get_single_contact_normal(self, object_id: Union[str, int], support_object_id: Union[str, int], deviation_tol: float = 0.05, return_center: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         contacts = self.get_contact_points(object_id, support_object_id)
         return self._compute_single_contact_normal_from_contacts(contacts, object_id, support_object_id, deviation_tol=deviation_tol, return_center=return_center)
 
-    def _compute_single_contact_normal_from_contacts(self, contacts: List[GeometricContactInfo], object_id: int, support_object_id: int, deviation_tol: float = 0.05, return_center: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    def _compute_single_contact_normal_from_contacts(self, contacts: List[GeometricContactInfo], object_id: Union[str, int], support_object_id: Union[str, int], deviation_tol: float = 0.05, return_center: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         if len(contacts) == 0:
             raise ValueError(f'No contact between {object_id} and {support_object_id}.')
 
@@ -266,6 +292,7 @@ class PlanningWorldInterface(object):
     def restore_world(self, world: Any):
         """Restore the world state from the given world state."""
         self._restore_world(world)
+
 
     def _restore_world(self, world: Any):
         raise NotImplementedError()
