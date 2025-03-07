@@ -1,0 +1,81 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : cdl-highlight
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 05/11/2024
+#
+# This file is part of Project Concepts.
+# Distributed under terms of the MIT license.
+
+import os
+import os.path as osp
+import platform
+import sys
+import tempfile
+import jacinle
+
+logger = jacinle.get_logger(__file__)
+parser = jacinle.JacArgumentParser()
+parser.add_argument('inputfile', type='checked_file', help='Input CDL file')
+parser.add_argument('--lexer', action='store_true', help='Print the lexer result')
+
+# Add a group of mutually exclusive arguments.
+group = parser.add_mutually_exclusive_group()
+group.add_argument('--html', action='store_true', help='Output as HTML')
+group.add_argument('--latex', action='store_true', help='Output as LaTeX')
+group.add_argument('--terminal', action='store_true', help='Output in the terminal')
+
+args = parser.parse_args()
+
+
+def write_to_clipboard(text):
+    from AppKit import NSPasteboard
+
+    pb = NSPasteboard.generalPasteboard()
+    pb.clearContents()
+    pb.setString_forType_(text, 'NSStringPboardType')
+
+
+def main():
+    sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
+    from concepts.dm.crow.parsers.cdl_formatter import check_cdl_token_styles, print_cdl_terminal, format_cdl_html, format_cdl_latex
+
+    with open(args.inputfile) as f:
+        string = f.read()
+
+    if args.lexer:
+        from concepts.dm.crow.parsers.cdl_formatter import lex_cdl_string
+        table = list()
+        for token in lex_cdl_string(string):
+            table.append((token.line, token.column, token.start_pos, token.end_pos, token.type, repr(token.value)))
+        print(jacinle.tabulate(table, headers=['line', 'column', 'start', 'end', 'type', 'value']))
+        print()
+
+    if args.html:
+        args.outputfile = osp.join(tempfile.gettempdir(), 'cdl-highlight.html')
+        with open(args.outputfile, 'w') as f:
+            f.write(format_cdl_html(string))
+        system_name = platform.system()
+        if system_name == 'Darwin':
+            os.system('open "' + args.outputfile + '"')
+        elif system_name == 'Linux':
+            os.system('xdg-open "' + args.outputfile + '"')
+        else:
+            raise NotImplementedError('Unsupported system: ' + system_name)
+    elif args.terminal:
+        print_cdl_terminal(string)
+    elif args.latex:
+        latex_fmt = format_cdl_latex(string)
+        print(latex_fmt)
+        write_to_clipboard(latex_fmt)
+        print('\nLaTeX code has been copied to the clipboard.')
+    else:
+        print_cdl_terminal(string)
+
+    check_cdl_token_styles(string)
+
+
+if __name__ == '__main__':
+    main()
+

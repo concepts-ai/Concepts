@@ -1,0 +1,90 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : cdl-summary
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 02/04/2022
+#
+# This file is part of HACL-PyTorch.
+# Distributed under terms of the MIT license.
+
+import os.path as osp
+import sys
+import re
+import jacinle
+
+logger = jacinle.get_logger(__file__)
+parser = jacinle.JacArgumentParser()
+parser.add_argument('inputfile', type='checked_file', help='Input CDL file', nargs='+')
+parser.add_argument('--lexer', action='store_true', help='Print the lexer result')
+args = parser.parse_args()
+
+
+def main():
+    sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
+    import concepts.dm.crow as crow
+
+    if len(args.inputfile) == 1:
+        pass
+    elif len(args.inputfile) == 2:
+        args.domain_file = args.inputfile[0]
+        args.problem_file = args.inputfile[1]
+    else:
+        raise ValueError('Invalid number of input files. Usage: cdl-summary <domain-file> <problem-file> or cdl-summary <domain-file> or cdl-summary <problem-file>')
+
+    string = None
+    if len(args.inputfile) == 1:
+        with open(args.inputfile[0]) as f:
+            string = f.read()
+        if args.lexer:
+            from concepts.dm.crow.parsers.cdl_formatter import lex_cdl_string
+            table = list()
+            for token in lex_cdl_string(string):
+                table.append((token.line, token.column, token.start_pos, token.end_pos, token.type, repr(token.value)))
+            print(jacinle.tabulate(table, headers=['line', 'column', 'start', 'end', 'type', 'value']))
+            print()
+    else:
+        if args.lexer:
+            raise ValueError('Lexer is only available for single file input.')
+
+    if len(args.inputfile) == 1:
+        # Find "^problem <name>" block in the string. If found, use load_problem_file
+        problem_match = re.search(r'^problem "([^"]+)"', string, re.MULTILINE)
+        problem = None
+        if problem_match:
+            problem = crow.load_problem_string(string)
+            domain = problem.domain
+        else:
+            domain = crow.load_domain_string(string)
+    else:
+        domain = crow.load_domain_file(args.domain_file)
+        problem = crow.load_problem_file(args.problem_file)
+
+    print('Domain:', domain.name)
+    table = list()
+    for k, v in domain.types.items():
+        table.append((f'Type::{k}', str(v)))
+    for k, v in domain.features.items():
+        table.append((f'Feature::{k}', str(v)))
+    for k, v in domain.functions.items():
+        table.append((f'Function::{k}', str(v)))
+    for k, v in domain.controllers.items():
+        table.append((f'Controller::{k}', v.long_str()))
+    for k, v in domain.behaviors.items():
+        table.append((f'Behavior::{k}', v.long_str()))
+    print(jacinle.tabulate(table))
+
+    if problem is not None:
+        print()
+        print('Problem:', problem.name)
+        table = list()
+        for k, v in problem.objects.items():
+            table.append((f'Object::{k}', str(v)))
+        table.append(('Goal', str(problem.goal)))
+        print(jacinle.tabulate(table))
+        print(problem.state)
+
+
+if __name__ == '__main__':
+    main()
+

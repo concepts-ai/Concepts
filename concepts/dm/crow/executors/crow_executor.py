@@ -814,20 +814,22 @@ class CrowExecutionCSPVisitor(CrowExecutionDefaultVisitor):
         self, function_name: str, argument_values: Sequence[TensorValueExecutorReturnType],
         return_type: Union[TensorValueTypeBase, PyObjValueType], auto_broadcast: bool = True, expression: Optional[E.FunctionApplicationExpression] = None
     ) -> TensorValue:
-        function = expression.function
-
         need_reset_simulation_state = False
         need_simulation_optimistic_execution = False
-        if isinstance(function, CrowFunction) and function.is_simulation_dependent or function.is_execution_dependent:
-            assert self.executor.state is not None
-            assert self.executor.csp is not None
 
-            # print(f'function_name: {function_name}, csp_t={self.executor.csp.get_state_timestamp()}, state_t={self.executor.state.simulation_state_index}')
-            if self.executor.csp.get_state_timestamp() != self.executor.state.simulation_state_index:
-                need_simulation_optimistic_execution = True
-            else:
-                if self.executor.state.simulation_state_index > 0:
-                    need_reset_simulation_state = True
+        # This is a hack to handle the case where the expression is ValueCompareExpression
+        if isinstance(expression, E.FunctionApplicationExpression):
+            function = expression.function
+            if isinstance(function, CrowFunction) and function.is_simulation_dependent or function.is_execution_dependent:
+                assert self.executor.state is not None
+                assert self.executor.csp is not None
+
+                # print(f'function_name: {function_name}, csp_t={self.executor.csp.get_state_timestamp()}, state_t={self.executor.state.simulation_state_index}')
+                if self.executor.csp.get_state_timestamp() != self.executor.state.simulation_state_index:
+                    need_simulation_optimistic_execution = True
+                else:
+                    if self.executor.state.simulation_state_index > 0:
+                        need_reset_simulation_state = True
 
         argument_values = expand_argument_values(argument_values)
         tensor_values = [argv for argv in argument_values if isinstance(argv, TensorValue)]

@@ -13,11 +13,12 @@
 The following algorithms and data structures have a generic interface. The are not designed specifically for a specific robot.
 """
 
+from typing import Optional, Tuple, List
+
 import jacinle
 import numpy as np
 import numpy.random as npr
 
-from typing import Optional, Tuple, List
 from concepts.algorithm.configuration_space import ProblemSpace
 
 __all__ = ['RRTNode', 'RRTTree', 'smooth_path', 'get_smooth_path', 'optimize_path', 'rrt', 'birrt']
@@ -109,14 +110,16 @@ class RRTTree(object):
         return best_node
 
 
-def smooth_path(pspace, path, nr_attemps=100, use_fine_path: bool = False):
+def smooth_path(pspace, path, nr_attemps=100, use_fine_path: bool = False, verbose=False):
+    if verbose:
+        print('start smoothing path')
     if nr_attemps is None:
         nr_attemps = 100
 
     if use_fine_path:
         path = get_smooth_path(pspace, path)
-
-    for i in range(nr_attemps):
+        print('get fine path')
+    for i in jacinle.tqdm(nr_attemps, desc='birrt::smoothing', disable=not verbose):
         if len(path) <= 2:
             break
 
@@ -200,6 +203,7 @@ def rrt(pspace, start_state, goal_state, nr_iterations=1000, p_sample_goal=0.05,
 def birrt(
     pspace: ProblemSpace, start_state, goal_state,
     nr_iterations=1000, nr_smooth_iterations=None, smooth_fine_path=False,
+    allow_invalid_start=False,
     verbose: bool = False
 ) -> Tuple[Optional[List[np.ndarray]], Tuple[RRTTree, RRTTree]]:
     rrt_start = RRTTree(pspace, RRTNode.from_states(start_state))
@@ -209,12 +213,13 @@ def birrt(
     if verbose:
         jacinle.lf_indent_print(f'birrt::input check: {pspace.validate_config(start_state)=}, {pspace.validate_config(goal_state)=}')
 
-    if not pspace.validate_config(start_state) or not pspace.validate_config(goal_state):
-        if not pspace.validate_config(start_state):
-            import warnings
-            warnings.warn('The start state is not valid.')
-            import ipdb; ipdb.set_trace()
+    if not pspace.validate_config(start_state) and not allow_invalid_start:
+        import warnings
+        warnings.warn('The start state is not valid.')
+        import ipdb; ipdb.set_trace()
+        return None, (rrt_start, rrt_goal)
 
+    if not pspace.validate_config(goal_state):
         return None, (rrt_start, rrt_goal)
 
     if True:
@@ -224,7 +229,7 @@ def birrt(
             if verbose:
                 jacinle.lf_indent_print('birrt::shortcut: Directly connected the start and goal states.')
             rrt_start.extend(rrt_start.nearest(goal_state), goal_state)
-            return smooth_path(pspace, [start_state, goal_state], 0, use_fine_path=smooth_fine_path), (rrt_start, rrt_goal)
+            return smooth_path(pspace, [start_state, goal_state], 0, use_fine_path=smooth_fine_path, verbose=verbose), (rrt_start, rrt_goal)
 
     for i in jacinle.tqdm(nr_iterations, desc='birrt::running', disable=not verbose):
         next_config = pspace.sample()
@@ -247,7 +252,7 @@ def birrt(
                 if swapped:
                     path.reverse()
                     rrt_start, rrt_goal = rrt_goal, rrt_start
-                return smooth_path(pspace, path, nr_smooth_iterations, use_fine_path=smooth_fine_path), (rrt_start, rrt_goal)
+                return smooth_path(pspace, path, nr_smooth_iterations, use_fine_path=smooth_fine_path, verbose=verbose), (rrt_start, rrt_goal)
             elif next_config is not None:
                 _ = rrt_goal.extend(node_goal, next_config)
 

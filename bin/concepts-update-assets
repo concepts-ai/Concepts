@@ -1,0 +1,14 @@
+#! /bin/bash
+#
+# concepts-update-assets.sh
+# Copyright (C) 2024 Jiayuan Mao <maojiayuan@gmail.com>
+#
+# Distributed under terms of the MIT license.
+#
+
+set -e
+
+cd "$(dirname "$0")"
+cd ../concepts/assets
+./sync-down.sh
+

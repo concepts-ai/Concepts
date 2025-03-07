@@ -85,7 +85,8 @@ def trimesh_to_open3d_mesh(trimesh_mesh: Trimesh) -> Open3DTriangleMesh:
 
     # Check and transfer vertex normals, if they exist
     if trimesh_mesh.vertex_normals.size > 0:
-        open3d_mesh.vertex_normals = o3d.utility.Vector3dVector(trimesh_mesh.vertex_normals)
+        vertex_normals = np.array(trimesh_mesh.vertex_normals, copy=True)
+        open3d_mesh.vertex_normals = o3d.utility.Vector3dVector(vertex_normals)
 
     # Check and transfer vertex colors, if they exist
     # Trimesh stores colors in the 'visual' attribute
@@ -114,11 +115,21 @@ def open3d_mesh_to_trimesh(open3d_mesh: Open3DTriangleMesh) -> Trimesh:
     # Convert Open3D mesh to Trimesh by extracting vertices and faces
     vertices = np.asarray(open3d_mesh.vertices)
     faces = np.asarray(open3d_mesh.triangles)
+    color = np.asarray(open3d_mesh.vertex_colors)
 
     # Create a Trimesh object using the extracted vertices and faces
-    trimesh_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    trimesh_mesh = trimesh.Trimesh(vertices=vertices, faces=faces, vertex_colors=color)
 
     return trimesh_mesh
+
+
+def open3d_pcd_to_trimesh_pcd(o3d_pcd: Open3DPointCloud) -> trimesh.PointCloud:
+    assert isinstance(o3d_pcd, o3d.geometry.PointCloud), "Input must be an Open3D PointCloud"
+    points = np.asarray(o3d_pcd.points)
+    colors = np.asarray(o3d_pcd.colors)
+    if len(points) == 0:
+        raise ValueError("Open3D PointCloud has no points")
+    return trimesh.points.PointCloud(points, colors=colors)
 
 
 def set_open3d_mesh_camera(

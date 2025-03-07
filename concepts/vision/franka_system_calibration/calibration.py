@@ -9,14 +9,16 @@
 # Distributed under terms of the MIT license.
 
 import numpy as np
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, TYPE_CHECKING
 
 from concepts.math.frame_utils_xyzw import compose_transformation, calc_transformation_matrix_from_plane_equation
 from concepts.math.rotationlib_xyzw import quat2mat
-from concepts.hw_interface.realsense.device_f import CaptureRS
 from concepts.simulator.pybullet.client import BulletClient
 from concepts.simulator.pybullet.components.panda.panda_robot import PandaRobot
 from concepts.vision.franka_system_calibration.ar_detection import get_ar_tag_detections, get_ar_tag_poses_from_camera_pose
+
+if TYPE_CHECKING:
+    from concepts.hw_interface.realsense.device_f import CaptureRS
 
 __all__ = [
     'get_camera_pose_using_pybullet', 'get_camera_pose_using_ikfast',
@@ -220,7 +222,7 @@ def get_camera_configs_using_ar_detection_from_camera_images(
 
 
 def get_camera_configs_using_ar_detection(
-    cameras: Dict[str, CaptureRS],
+    cameras: Dict[str, 'CaptureRS'],
     reference_camera_name: str, reference_camera_pose: np.ndarray,
     calibrate_robot: bool = False,
     robot_to_camera_transforms: Optional[Dict[str, Tuple[str, np.ndarray]]] = None

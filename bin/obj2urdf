@@ -1,0 +1,42 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : obj2urdf.py
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 08/25/2022
+#
+# This file is part of HACL-PyTorch.
+# Distributed under terms of the MIT license.
+
+import os.path as osp
+import sys
+import jacinle
+
+sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
+
+from concepts.simulator.urdf_utils.obj2urdf import ObjectUrdfBuilder  # noqa: E402
+
+center_options = ['mass', 'geometry', 'top', 'bottom', 'xy_pos', 'xy_neg', 'xz_pos', 'xz_neg', 'yz_pos', 'yz_neg']
+
+logger = jacinle.get_logger(__file__)
+parser = jacinle.JacArgumentParser(description='Convert obj file to urdf file.')
+parser.add_argument('obj_file', help='obj file')
+parser.add_argument('--center', default='mass', choices=center_options, help='center of the object')
+parser.add_argument('--force-pybullet-vhacd', action='store_true', help='force to use pybullet vhacd for decomposition')
+args = parser.parse_args()
+
+
+def main():
+    if args.force_pybullet_vhacd:
+        builder = ObjectUrdfBuilder(osp.dirname(args.obj_file), use_trimesh_vhacd=False, use_pybullet_vhacd=True)
+    else:
+        # Use the default setting: it will use trimesh vhacd if available, otherwise use pybullet vhacd.
+        builder = ObjectUrdfBuilder(osp.dirname(args.obj_file))
+
+    builder.build_urdf(args.obj_file, force_overwrite=True, decompose_concave=True, force_decompose=False, center=args.center)
+
+
+if __name__ == '__main__':
+    main()
+
+

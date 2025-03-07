@@ -120,24 +120,6 @@ class CognitionManager(object):
     def is_physical_interface_available(self) -> bool:
         return self.pci is not None
 
-    def is_vision_pipeline_available(self) -> bool:
-        return self.vision_pipeline is not None
-
-    def init_vision(self, enable_gpt: bool = False, gpt_object_names: Optional[List[str]] = None):
-        from skill_recon.vision_utils import VisionPipeline
-        self.vision_pipeline = VisionPipeline(enable_gpt=enable_gpt, gpt_object_names=gpt_object_names)
-        self.vision_pipeline.attach_cogman(self)
-
-    def sync_vision(self, camera_names: Optional[List[str]] = None, **kwargs):
-        assert self.is_vision_pipeline_available()
-        self.vision_pipeline.sync(self, camera_names=camera_names, **kwargs)
-
-    def inspect_vision_detection(self):
-        self.vision_pipeline.interactive_inspection()
-
-    def inspect_simulation(self):
-        self.get_simulation_env().client.wait_forever()
-
     def get_robot_state(self) -> Any:
         raise NotImplementedError()
 

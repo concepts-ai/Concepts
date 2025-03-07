@@ -13,7 +13,8 @@ Here, we distinguish between the simulation interface and the physical interface
 """
 
 import contextlib
-from typing import Optional, Tuple, Dict, Callable
+from typing import Optional, Union, Sequence, Tuple, List, Dict, Callable
+from dataclasses import dataclass
 
 from concepts.dsl.tensor_value import TensorValue
 from concepts.dm.crow.behavior import CrowEffectApplier
@@ -28,6 +29,24 @@ class CrowControllerExecutionError(Exception):
     pass
 
 
+@dataclass
+class CrowControllerReflex(object):
+    callable: Callable
+    priority: int
+    uid: int
+
+
+class CrowControllerReflexCaller(object):
+    def __init__(self, reflex_list: List[CrowControllerReflex]):
+        self._reflex_list = reflex_list
+
+    def __call__(self, *args, **kwargs):
+        for reflex in self._reflex_list:
+            result = reflex.callable(*args, **kwargs)
+            if result is not None:
+                return result
+
+
 class CrowControllerInterfaceBase(object):
     """The base class for all controller interfaces.
 
@@ -37,7 +56,9 @@ class CrowControllerInterfaceBase(object):
     def __init__(self, executor: Optional[CrowExecutor] = None, mock: bool = False):
         self._executor = executor
         self._controllers = dict()
+        self._controller_reflexes = dict()
         self._mock = mock
+        self._controller_reflexes_uid = 0
 
     @property
     def executor(self) -> Optional[CrowExecutor]:
@@ -47,6 +68,10 @@ class CrowControllerInterfaceBase(object):
     def controllers(self) -> Dict[str, Callable]:
         return self._controllers
 
+    @property
+    def controller_reflexes(self) -> Dict[Tuple[str, str], CrowControllerReflex]:
+        return self._controller_reflexes
+
     def reset(self):
         pass
 
@@ -54,7 +79,22 @@ class CrowControllerInterfaceBase(object):
         self.controllers[name] = function
         return self
 
-    def step(self, action: CrowControllerApplier, **kwargs) -> None:
+    def register_reflex(self, controller_name: str, reflex_name: str, function: Callable, priority: int = 10):
+        self._controller_reflexes_uid += 1
+        self.controller_reflexes[(controller_name, reflex_name)] = CrowControllerReflex(function, priority, self._controller_reflexes_uid)
+        return self
+
+    def reflex(self, controller_name: str, reflex_name: Optional[Union[str, Sequence[str]]] = None):
+        if reflex_name is None:
+            functions = [reflex for (name, _), reflex in self.controller_reflexes.items() if name == controller_name]
+        elif isinstance(reflex_name, str):
+            functions = [self.controller_reflexes[(controller_name, reflex_name)]]
+        else:
+            functions = [self.controller_reflexes[(controller_name, name)] for name in reflex_name]
+        functions.sort(key=lambda x: (x.priority, x.uid), reverse=True)
+        return CrowControllerReflexCaller(functions)
+
+    def step(self, action: CrowControllerApplier, **kwargs) -> Optional[bool]:
         if isinstance(action, CrowEffectApplier):
             return
         return self.step_internal(action.name, *action.arguments, **kwargs)
@@ -66,7 +106,7 @@ class CrowControllerInterfaceBase(object):
             return False
         return True
 
-    def step_internal(self, name: str, *args, **kwargs) -> None:
+    def step_internal(self, name: str, *args, **kwargs) -> Optional[bool]:
         if self._mock:
             print('Mocked controller:', name)
             args = [arg.item() if isinstance(arg, TensorValue) and arg.dtype.is_pyobj_value_type else arg for arg in args]

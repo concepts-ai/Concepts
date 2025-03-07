@@ -11,7 +11,7 @@
 """Utilities for frame transformations in the XYZW convention. It focuses on transformation matrices and quaternions used in robotics."""
 
 import numpy as np
-from typing import Tuple, TYPE_CHECKING
+from typing import Tuple, List, TYPE_CHECKING
 from concepts.math.rotationlib_xyzw import quat_mul, quat_conjugate, rotate_vector, mat2quat, quat2mat, axisangle2quat
 from concepts.utils.typing_utils import Vec3f, Vec4f
 
@@ -105,6 +105,13 @@ def compose_transformation(pos1: Vec3f, quat1: Vec4f, pos2: Vec3f, quat2: Vec4f)
     quat2 = np.asarray(quat2, dtype=np.float64)
 
     return pos1 + rotate_vector(pos2, quat1), quat_mul(quat1, quat2)
+
+
+def compose_transformations(pos_quat_list: List[Tuple[Vec3f, Vec4f]]) -> Tuple[np.ndarray, np.ndarray]:
+    rv_pos, rv_quat = pos_quat_list[0]
+    for (pos_next, quat_next) in pos_quat_list[1:]:
+        rv_pos, rv_quat = compose_transformation(rv_pos, rv_quat, pos_next, quat_next)
+    return rv_pos, rv_quat
 
 
 def inverse_transformation(pos: Vec3f, quat: Vec4f) -> Tuple[np.ndarray, np.ndarray]:

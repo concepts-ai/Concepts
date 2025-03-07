@@ -20,7 +20,7 @@ args = parser.parse_args()
 
 def main():
     sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
-    import concepts.pdsketch as pds
+    import concepts.dm.pdsketch as pds
 
     domain = pds.load_domain_file(args.inputfile)
     domain.print_summary()

@@ -63,11 +63,11 @@ class PyBulletQDDLInterface(object):
 
     def load_scene(self, domain_file, problem_file) -> QDDLSceneMetainfo:
         _, problem = load_qddl(domain_file, problem_file)
-        return self._load_scene(problem, self.package_map)
+        return self._load_scene(problem, self.package_map, osp.dirname(problem_file))
 
-    def load_scene_string(self, domain_string, problem_string) -> QDDLSceneMetainfo:
+    def load_scene_string(self, domain_string, problem_string, dirname: str = '') -> QDDLSceneMetainfo:
         _, problem = load_qddl_string(domain_string, problem_string)
-        return self._load_scene(problem, self.package_map)
+        return self._load_scene(problem, self.package_map, dirname)
 
     def _load_problem_metainfo(self, problem) -> QDDLProblemMetainfo:
         goals = list()
@@ -77,7 +77,7 @@ class PyBulletQDDLInterface(object):
             goals.append(f"{name}({', '.join(args)})")
         return QDDLProblemMetainfo(goal=" and ".join(goals))
 
-    def _load_scene(self, problem, package_map: Dict[str, str]) -> QDDLSceneMetainfo:
+    def _load_scene(self, problem, package_map: Dict[str, str], dirname: str = '') -> QDDLSceneMetainfo:
         objects = dict()
         boxes = list()
         metainfo = QDDLSceneMetainfo()
@@ -194,6 +194,12 @@ class PyBulletQDDLInterface(object):
                     metainfo.objects[box_name] = QDDLSceneObjectMetainfo(box_id, color=box_colors.get(box_name, (1, 0, 0, 1)), moveable=not static.get(box_name, False))
 
             for object_name, object_url in objects.items():
+                if osp.exists(object_url):
+                    pass
+                elif osp.exists(osp.join(dirname, object_url)):
+                    object_url = osp.join(dirname, object_url)
+                else:
+                    raise ValueError(f"File {object_url} does not exist.")
                 with open(object_url, "r") as f:
                     xml = f.read()
 

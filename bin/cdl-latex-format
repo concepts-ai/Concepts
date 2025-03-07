@@ -1,0 +1,62 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : cdl-latex-format
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 05/11/2024
+#
+# This file is part of Project Concepts.
+# Distributed under terms of the MIT license.
+
+import os
+import os.path as osp
+import re
+import sys
+import jacinle
+
+logger = jacinle.get_logger(__file__)
+parser = jacinle.JacArgumentParser()
+parser.add_argument('inputdir', type='checked_dir', help='Input directory')
+args = parser.parse_args()
+
+
+def main():
+    sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
+    from concepts.dm.crow.parsers.cdl_formatter import check_cdl_token_styles, print_cdl_terminal, format_cdl_html, format_cdl_latex
+
+    jacinle.mkdir(osp.join(args.inputdir, '_cdl_latex_files'))
+
+    regex = re.compile(r'\\begin{cdlcode}(.*?)\\end{cdlcode}|\\begin{cdlcodehide}(.*?)\\end{cdlcodehide}\n\\input{.*?}%*\n', re.DOTALL)
+    for filename in jacinle.lsdir(args.inputdir, '**/*.tex', return_type='rel'):
+        print(filename)
+        with open(osp.join(args.inputdir, filename)) as f:
+            string = f.read()
+
+        output_filename = filename.replace(os.path.sep, '__')
+        output_index = 0
+
+        def repl(match):
+            if match.group(1) is not None:
+                code = match.group(1)
+            else:
+                code = match.group(2)
+
+            nonlocal output_index
+            output_index += 1
+            this_output_filename = output_filename + '__{}.tex'.format(output_index)
+            with open(osp.join(args.inputdir, '_cdl_latex_files', this_output_filename), 'w') as f:
+                f.write(format_cdl_latex(code))
+            print_cdl_terminal(code)
+            check_cdl_token_styles(code)
+
+            this_output_string = '\\begin{cdlcodehide}' + code + '\\end{cdlcodehide}\n\\input{_cdl_latex_files/' + this_output_filename + '}%\n'
+            return this_output_string
+
+        output_string = regex.sub(repl, string)
+        with open(osp.join(args.inputdir, filename), 'w') as f:
+            f.write(output_string)
+
+
+if __name__ == '__main__':
+    main()
+

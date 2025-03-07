@@ -870,19 +870,41 @@ class CrowEffectApplier(object):
     """
     def __init__(
         self, statements: Sequence[Union[CrowFeatureAssignmentExpression, CrowBehaviorForeachLoopSuite, CrowBehaviorConditionSuite]],
-        bounded_variables: Dict[str, Union[ObjectConstant, TensorValue]],
+        bounded_variables: Dict[str, Union[ObjectConstant, TensorValue]], *,
+        global_constraints: Optional[Dict[int, Sequence[ValueOutputExpression]]] = None, local_constraints: Optional[Sequence[ValueOutputExpression]] = None
     ):
         self.statements = tuple(statements)
         self.bounded_variables = bounded_variables
+        self.global_constraints = global_constraints
+        self.local_constraints = local_constraints
 
+    global_constraints: Optional[Dict[int, Tuple[Tuple[ValueOutputExpression, ...], dict]]]
+    """The global constraints of the controller application."""
 
-    def long_str(self):
-        return self.short_str()
+    local_constraints: Optional[Tuple[Tuple[ValueOutputExpression, ...], dict]]
+    """The local constraints of the controller application."""
+
+    def set_constraints(self, global_constraints: Dict[int, Sequence[ValueOutputExpression]], global_scopes: Dict[int, dict], scope_id: int):
+        # TODO(Jiayuan Mao @ 2025/01/14): set the scopes associated with these constraints...
+        self.global_constraints = {k: (tuple(v), global_scopes[k]) for k, v in global_constraints.items()}
+        self.local_constraints = self.global_constraints.get(scope_id, None)
+        return self
 
     def short_str(self):
-        from concepts.dm.crow.behavior_utils import format_behavior_program
-        fmt = format_behavior_program(CrowBehaviorOrderingSuite.make_sequential(self.statements, variable_scope_identifier=0), {0: self.bounded_variables})
+        from concepts.dm.crow.behavior_utils import format_behavior_statement
+        fmt = '\n'.join(format_behavior_statement(x, scope=self.bounded_variables) for x in self.statements)
         return f'effect_apply{{\n{indent_text(fmt)}\n}}'
+
+    def long_str(self) -> str:
+        from concepts.dm.crow.behavior_utils import format_behavior_statement
+        fmt = self.short_str()
+        if self.global_constraints is not None:
+            global_constraints_str = indent_text('\n'.join(f'{k}: {{{", ".join(str(format_behavior_statement(c, scope=scope)) for c in constraints)}}}' for k, (constraints, scope) in self.global_constraints.items()), 2)
+            fmt += f'\n  with global constraints:\n{global_constraints_str}'
+        if self.local_constraints is not None:
+            local_constraints_str = '{' + ', '.join(str(format_behavior_statement(c, scope=self.local_constraints[1])) for c in self.local_constraints[0]) + '}'
+            fmt += f'\n  with local constraints: {local_constraints_str}'
+        return fmt
 
     def __str__(self):
         return self.short_str()

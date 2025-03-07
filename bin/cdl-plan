@@ -1,0 +1,158 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : cdl-plan
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 07/3/2024
+#
+# This file is part of Project Concepts.
+# Distributed under terms of the MIT license.
+
+import time
+import warnings
+import jacinle
+
+import concepts.dm.crow as crow
+
+parser = jacinle.JacArgumentParser(description='CDL planning. Usage: cdl-plan <problem-file> or cdl-plan <domain-file> <problem-file>')
+parser.add_argument('input_files', type=str, nargs='+')
+parser.add_argument('--debug', action='store_true')
+parser.add_argument('--format', type=str, default='str', choices=['str', 'json'])
+parser.add_argument('--all', action='store_true', help='Print all solutions found.')
+parser.add_argument('--print-stat', action='store_true')
+parser.add_argument('--print-start-state', action='store_true')
+parser.add_argument('--print-end-state', action='store_true')
+parser.add_argument('--print-effect-appliers', action='store_true')
+parser.add_argument('--print-dependency-graph', action='store_true')
+parser.add_argument('--visualize-dependency-graph', action='store_true')
+parser.add_argument('--verbose', action='store_true')
+parser.add_argument('--embed', action='store_true')
+parser.add_argument('--algo', type=str, default=None)
+parser.add_argument('--options', type='kv', nargs='+', default=None)
+parser.add_argument('--min-search-depth', type=int, default=None)
+parser.add_argument('--max-search-depth', type=int, default=None)
+parser.add_argument('--always-commit-skeleton', type='bool', default=None)
+parser.add_argument('--is-goal-ordered', type='bool', default=None)
+parser.add_argument('--is-goal-serializable', type='bool', default=None)
+args = parser.parse_args()
+
+
+def plan(domain_file, problem_file):
+    start_time = time.time()
+    domain = None
+    if domain_file is not None:
+        domain = crow.load_domain_file(domain_file)
+    domain_loading_time = time.time() - start_time
+    start_time = time.time()
+    problem = crow.load_problem_file(problem_file, domain=domain)
+    end_time = time.time()
+    problem_loading_time = end_time - start_time
+
+    if args.print_start_state:
+        print(problem.state)
+
+    kwargs = problem.planner_options.copy()
+    for key in ['min_search_depth', 'max_search_depth', 'always_commit_skeleton', 'is_goal_ordered', 'is_goal_serializable']:
+        if (value := getattr(args, key)) is not None:
+            warnings.warn(f'Overriding planner option {key} with command line argument --{key} has been deprecated. Use --options key1=value1 key2=value2 instead.', DeprecationWarning)
+            kwargs[key] = value
+
+    if args.algo is not None:
+        kwargs['algo'] = args.algo
+
+    if args.options is not None:
+        for opt in args.options:
+            kwargs.update(opt.kvs)
+
+    if len(kwargs) > 0:
+        print(jacinle.colored('Planner options:', 'cyan'))
+        for key, value in kwargs.items():
+            print(f'  {key}: {value}')
+
+    kwargs['include_effect_appliers'] = args.print_effect_appliers
+    kwargs['include_dependency_trace'] = args.print_dependency_graph or args.visualize_dependency_graph
+
+    start_time = time.time()
+    planner = crow.crow_regression(problem.domain, problem, **kwargs, verbose=args.verbose, return_planner=True)
+    rv, stat = planner.main()
+    end_time = time.time()
+    planning_time = end_time - start_time
+
+    solution = None
+    if len(rv) == 0:
+        print(jacinle.colored('No plan found.', 'red'))
+    else:
+        if args.all:
+            for i, solution in enumerate(rv):
+                if args.format == 'json':
+                    print(jacinle.io.dumps_json(crow.make_plan_serializable(solution, json_compatible=True), compressed=False))
+                elif args.format == 'str':
+                    print(jacinle.colored(f'Solution {i}:', 'green'))
+                    for action in solution:
+                        print(action)
+                else:
+                    raise ValueError(f'Invalid format: {args.format}')
+
+                if args.print_end_state:
+                    raise ValueError('Cannot print end state when --all is specified.')
+                if args.print_dependency_graph or args.visualize_dependency_graph:
+                    raise ValueError('Cannot print dependency graph when --all is specified.')
+        else:
+            solution = rv[0]
+            raw_result = planner.results[0]
+            if args.format == 'json':
+                print(jacinle.io.dumps_json(crow.make_plan_serializable(solution, json_compatible=True), compressed=False))
+            elif args.format == 'str':
+                for action in solution:
+                    print(action)
+            else:
+                raise ValueError(f'Invalid format: {args.format}')
+            if args.print_end_state:
+                print(raw_result.state)
+
+            depdency_graph = None
+            if args.print_dependency_graph or args.visualize_dependency_graph:
+                if not hasattr(raw_result, 'dependency_trace'):
+                    print(jacinle.colored('Dependency graph is not available.', 'red'))
+                else:
+                    depdency_graph = crow.recover_dependency_graph_from_trace(raw_result.dependency_trace, raw_result.scopes)
+
+            if args.print_dependency_graph:
+                print(jacinle.colored('Dependency graph:', 'cyan'))
+                depdency_graph.print()
+            if args.visualize_dependency_graph:
+                depdency_graph.render_graphviz()
+
+    if args.print_stat:
+        table = list()
+        table.append(('goal', str(problem.goal)))
+        table.append(('plan_length', len(solution) if solution is not None else 'N/A'))
+        table.append(('domain_loading_time', f'{domain_loading_time:.3f}s'))
+        table.append(('problem_loading_time', f'{problem_loading_time:.3f}s'))
+        table.append(('planning_time', f'{planning_time:.3f}s'))
+        table.extend(stat.items())
+        print(jacinle.tabulate(table, tablefmt='simple'))
+
+    if args.embed:
+        import IPython
+        IPython.embed()
+
+
+def format_solution(solution):
+    return [{'name': action.name, 'arguments': action.arguments} for action in solution]
+
+
+if __name__ == '__main__':
+    if args.debug:
+        jacinle.hook_exception_ipdb()
+
+    if len(args.input_files) == 1:
+        domain_file = None
+        problem_file = args.input_files[0]
+    elif len(args.input_files) == 2:
+        domain_file, problem_file = args.input_files
+    else:
+        raise ValueError('Invalid number of input files.')
+
+    plan(domain_file, problem_file)
+

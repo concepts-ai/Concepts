@@ -1,0 +1,37 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# File   : cdl-highlight
+# Author : Jiayuan Mao
+# Email  : maojiayuan@gmail.com
+# Date   : 07/13/2024
+#
+# This file is part of Project Concepts.
+# Distributed under terms of the MIT license.
+
+import os.path as osp
+import sys
+import jacinle
+
+logger = jacinle.get_logger(__file__)
+parser = jacinle.JacArgumentParser()
+parser.add_argument('inputfile', type='checked_file', help='Input CDL file')
+args = parser.parse_args()
+
+
+def main():
+    sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
+
+    with open(args.inputfile) as f:
+        string = f.read()
+
+    from concepts.dm.crow.parsers.cdl_formatter import lex_cdl_string
+    table = list()
+    for token in lex_cdl_string(string):
+        table.append((token.line, token.column, token.start_pos, token.end_pos, token.type, repr(token.value)))
+    print(jacinle.tabulate(table, headers=['line', 'column', 'start', 'end', 'type', 'value']))
+    print()
+
+
+if __name__ == '__main__':
+    main()
+

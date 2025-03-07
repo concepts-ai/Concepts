@@ -175,7 +175,7 @@ class ConstrainedConfigurationSpace(ProxyConfigurationSpace):
 
     def constrain_config(self, config):
         if self.constrain_config_func is not None:
-            return self.constrain_config_func(self, config)
+            return self.constrain_config_func(config)
 
         raise NotImplementedError()
 
@@ -216,7 +216,7 @@ class BoxConstrainedConfigurationSpace(ConstrainedConfigurationSpace):
             return tuple(x * self._cspace_max_stepdiff_proj for x in self.cspace_max_stepdiff)
         return self._cspace_max_stepdiff_proj
 
-    def gen_path(self, config1, config2):
+    def gen_path_clip(self, config1, config2):
         assert self.validate_config(config1) and self.validate_config(config2)
 
         config = config1
@@ -224,7 +224,13 @@ class BoxConstrainedConfigurationSpace(ConstrainedConfigurationSpace):
         success = False
 
         for i in range(1000):
-            config = config + np.fmin(self.cspace_max_stepdiff, np.array(config2) - np.array(config))
+            # config = config + np.fmin(self.cspace_max_stepdiff, np.array(config2) - np.array(config))
+            config = config + np.clip(
+                np.array(config2) - np.array(config),
+                -self.cspace_max_stepdiff,
+                self.cspace_max_stepdiff
+            )
+
             config = self.constrain_config(config)
 
             diffs = [self.cspace_ranges[i].difference(path[-1][i], config[i]) for i in range(len(self.cspace_ranges))]
@@ -240,6 +246,36 @@ class BoxConstrainedConfigurationSpace(ConstrainedConfigurationSpace):
                 break
 
         return success, path
+
+    def gen_path_l1(self, config1, config2):
+        assert self.validate_config(config1) and self.validate_config(config2)
+        diffs = [self.cspace_ranges[i].difference(config1[i], config2[i]) for i in range(len(self.cspace_ranges))]
+        samples = max([
+            int(np.ceil(abs(diff) / max_diff)) + 1
+            for diff, max_diff in zip(diffs, self.cspace_max_stepdiff)
+        ])
+        samples = max(2, samples)
+        linear_interpolation = [diff / (samples - 1) for diff in diffs]
+        path = [config1]
+        for s in range(1, samples - 1):
+            config = tuple(
+                self.cspace_ranges[i].make_in_range(config1[i] + s * linear_interpolation[i])
+                for i in range(len(self.cspace_ranges))
+            )
+            config = self.constrain_config(config)
+            diffs = [
+                self.cspace_ranges[i].difference(path[-1][i], config[i])
+                for i in range(len(self.cspace_ranges))
+            ]
+            valid = all(abs(diff) < constrain for diff, constrain in zip(diffs, self.cspace_max_stepdiff_proj))
+            if not valid:
+                return False, path
+            path.append(config)
+        path.append(config2)
+        return True, path
+
+    def gen_path(self, config1: tuple, config2: tuple):
+        return self.gen_path_l1(config1, config2)
 
 
 class ProblemSpace(object):

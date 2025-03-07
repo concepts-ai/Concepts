@@ -43,7 +43,11 @@ class RBY1AUPCInterface(Service):
     RS_SERIAL_NUMBER = '231122072622'
     USE_STREAM_INTERFACE = True
 
-    def __init__(self, connect: bool = True, init_camera: bool = True, init_grippers: bool = True, address: str = DEFAULT_ROBOT_ADDRESS, priority: int = DEFAULT_PRIORITY):
+    def __init__(
+            self, connect: bool = True, init_camera: bool = True, init_grippers: bool = True,
+            address: str = DEFAULT_ROBOT_ADDRESS, priority: int = DEFAULT_PRIORITY,
+            devices: Optional[str] = None
+    ):
         super().__init__({
             'robot_address': address,
             'configs': self.DEFAULT_CONFIGS,
@@ -71,7 +75,7 @@ class RBY1AUPCInterface(Service):
         assert self.pb_robot is not None  # Initialize the robot model
 
         if connect:
-            self.connect(init_camera=init_camera, init_grippers=init_grippers)
+            self.connect(init_camera=init_camera, init_grippers=init_grippers, devices=devices)
 
     @property
     def address(self) -> str:
@@ -111,10 +115,10 @@ class RBY1AUPCInterface(Service):
     def connected(self) -> bool:
         return self._connected
 
-    def connect(self, init_camera: bool = True, init_grippers: bool = True):
+    def connect(self, init_camera: bool = True, init_grippers: bool = True, devices: Optional[str] = None):
         self._robot = rby1_sdk.create_robot_a(self.address)
         self._robot.connect()
-        self.power_on()
+        self.power_on(devices)
         self._connect_configure()
 
         if init_grippers:
@@ -395,8 +399,11 @@ class RBY1AUPCInterface(Service):
                 command.set_minimum_time(min_time)
                 command.set_command_header(rby1_sdk.CommandHeaderBuilder().set_control_hold_time(control_hold_time))
                 components.set_mobility_command(command)
+            # elif key in ('left_gripper', 'right_gripper', 'left_wheel', 'right_wheel', '__all__'):
+            #     pass
             else:
-                raise ValueError(f"Invalid key {key}")
+                pass
+                # raise ValueError(f"Invalid key {key}")
 
         if include_body_command:
             components.set_body_command(body_command)
@@ -424,8 +431,8 @@ class RBY1AUPCInterface(Service):
             'head': np.zeros(2),
         }, timeout=min_time * 1.5, min_time=min_time)
 
-    def power_on(self):
-        _init_robot(self.robot)
+    def power_on(self, devices: Optional[str] = None):
+        _init_robot(self.robot, devices)
 
     def power_off(self):
         self.robot.power_off('.*')
@@ -562,7 +569,7 @@ class RBY1AServiceVisualizerInterface(object):
             update()
 
 
-def _init_robot(robot: rby1_sdk.Robot_A):
+def _init_robot(robot: rby1_sdk.Robot_A, servo_devices=None):
     if not robot.is_connected():
         print("Robot is not connected")
         exit(1)
@@ -574,8 +581,11 @@ def _init_robot(robot: rby1_sdk.Robot_A):
             print("Failed to power on")
             exit(1)
     print('Robot is powered on')
-    if not robot.is_servo_on(power_device):
-        rv = robot.servo_on(power_device)
+    if servo_devices is None:
+        servo_devices = ".*"
+    if not robot.is_servo_on(servo_devices):
+        rv = robot.servo_on(servo_devices)
+        print(f"Try to servo on for {servo_devices}")
         if not rv:
             print("Failed to servo on")
             exit(1)

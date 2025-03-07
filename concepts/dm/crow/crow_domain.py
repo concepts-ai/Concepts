@@ -580,7 +580,7 @@ class CrowDomain(DSLDomainBase):
 
 class CrowProblem(object):
     def __init__(self, domain: CrowDomain):
-        self.domain = domain
+        self.domain = domain.clone(deep=False)
         self.name = None
         self.objects = dict()
         self.state = None
@@ -601,6 +601,13 @@ class CrowProblem(object):
         problem.goal = goal
         return problem
 
+    @classmethod
+    def from_state_and_goal_program(cls, domain: CrowDomain, state: 'CrowState', goal_program: str):
+        problem = cls(domain)
+        problem.state = state
+        domain.set_goal_program(goal_program)
+        return problem
+
     def add_object(self, name: str, typename: str):
         self.objects[name] = typename
 
@@ -613,6 +620,9 @@ class CrowProblem(object):
 
     def set_goal(self, goal: Union[ValueOutputExpression, str]):
         self.goal = goal
+
+    def set_goal_program(self, goal_program: str):
+        domain.set_goal_program(goal_program)
 
 
 class CrowState(NamedObjectTensorState):

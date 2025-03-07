@@ -1517,8 +1517,8 @@ class CDLProblemTransformer(CDLDomainTransformer):
         if self._domain is not None:
             raise ValueError('Domain is already initialized. Cannot overwrite the domain.')
 
-        self._domain = domain.clone(deep=False)
-        self._problem = CrowProblem(domain=self.domain)
+        self._problem = CrowProblem(domain=domain)
+        self._domain = self._problem.domain
         self._expression_def_ctx = E.ExpressionDefinitionContext(domain=self.domain)
         self._expression_interpreter = CDLExpressionInterpreter(domain=self.domain, state=state, expression_def_ctx=self.expression_def_ctx, auto_constant_guess=self.auto_constant_guess)
 

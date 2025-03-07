@@ -32,7 +32,7 @@ from concepts.dm.crow.executors.crow_executor import CrowExecutor
 
 __all__ = [
     'ApplicableBehaviorItem', 'match_applicable_behaviors', 'match_policy_applicable_behaviors',
-    'crow_replace_expression_variables_ext', 'format_behavior_statement', 'format_behavior_program',
+    'crow_replace_expression_variables_ext', 'format_behavior_statement', 'format_behavior_program', 'format_scope_constraints',
     'execute_effect_statements', 'execute_behavior_effect_body', 'execute_effect_applier',
     'execute_object_bind', 'execute_additive_heuristic_program'
 ]
@@ -208,6 +208,8 @@ def format_behavior_statement(
                 formatted_value = ObjectConstantExpression(ObjectConstant(value, value.element_type))
             elif isinstance(value, TensorValue):
                 formatted_value = ConstantExpression(value)
+            elif isinstance(value, str):
+                formatted_value = ObjectConstantExpression(ObjectConstant(value, AutoType))
             else:
                 formatted_value = value
             formatted_scope[VariableExpression(formatted_name)] = formatted_value
@@ -269,6 +271,13 @@ def format_behavior_program(program: CrowBehaviorOrderingSuite, scopes: Optional
             fmt += indent_text(format_behavior_statement(stmt, scopes=scopes, scope_id=program.variable_scope_identifier)) + '\n'
     fmt += '}'
     return fmt
+
+
+def format_scope_constraints(scope_constraints: Dict[int, Tuple[Tuple[ValueOutputExpression, ...], dict]], scopes: Dict[str, Any]) -> str:
+    fmt = ''
+    for scope_id, constraints in scope_constraints.items():
+        fmt += f'{scope_id}: {", ".join(str(format_behavior_statement(c, scopes)) for c in constraints)}\n'
+    return fmt.strip()
 
 
 def execute_effect_statements(

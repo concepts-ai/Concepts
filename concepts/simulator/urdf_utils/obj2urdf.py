@@ -306,7 +306,7 @@ class ObjectUrdfBuilder(object):
 
         # If the user wants to run convex decomposition on concave objects, do it.
         if decompose_concave:
-            if file_extension == '.stl':
+            if file_extension == '.stl' or file_extension == '.STL':
                 obj_filename = self.save_to_obj(filename)
                 visual_file = rel.replace(file_extension, '.obj')
             elif file_extension == '.obj':

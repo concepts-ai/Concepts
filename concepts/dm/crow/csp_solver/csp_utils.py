@@ -44,7 +44,7 @@ def csp_ground_action(executor: CrowExecutor, action: Union[CrowControllerApplie
         new_bounded_variables = dict()
         for k, v in action.bounded_variables.items():
             new_bounded_variables[k] = _ground_element(executor, assignments, v)
-        return CrowEffectApplier(action.statements, new_bounded_variables)
+        return CrowEffectApplier(action.statements, new_bounded_variables, global_constraints=action.global_constraints, local_constraints=action.local_constraints)
     else:
         raise TypeError(f'Unsupported action type: {type(action)}.')
 

@@ -10,7 +10,6 @@
 
 import re
 import weakref
-import itertools
 from typing import Any, Optional, Union, Iterator, Tuple, NamedTuple, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
 
@@ -923,6 +922,12 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
             new_scopes = result.scopes
             new_scope_constraints = result.scope_constraints
         new_scope_constraint_evaluations = dict()
+
+        effect_applier.set_constraints(
+            new_scope_constraints,
+            new_scopes,
+            scope_id
+        )
 
         if self.verbose:
             print('    Previous Actions', result.controller_actions)

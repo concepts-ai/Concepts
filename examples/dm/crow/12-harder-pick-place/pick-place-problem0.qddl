@@ -35,7 +35,7 @@
     (urdf::prop cube "MASS" 0.2)
     (urdf::prop cube "LATERAL_FRICTION" 1.0)
     ;; rgba is directly set through the load_urdf function so we are listing it as a urdf-load-arg here
-    (urdf::load-arg cube "rgba" (1.0, 0.34, 0.34, 1.0))
+    (urdf::prop     cube "COLOR" (1.0, 0.34, 0.34, 1.0))
 
     (sim::camera-distance 1.5)
     (sim::camera-yaw 90)

@@ -83,7 +83,7 @@ for keyword in {
 
 def main():
     sys.path.insert(0, osp.join(osp.dirname(__file__), '..'))
-    import concepts.pdsketch as pds
+    import concepts.dm.pdsketch as pds
 
     parser = pds.PDSketchParser()
     with open(args.inputfile) as f:
