@@ -158,6 +158,9 @@ class DeoxysService(Service):
                 self.single_move_qpos(robot_index, qpos)
         return rv
 
+    def get_gripper_state(self):
+        return {robot_index: robot.last_gripper_q.copy() for robot_index, robot in self.robots.items()}
+
     def get_all_qpos(self):
         return {robot_index: robot.last_q.copy() for robot_index, robot in self.robots.items()}
 
@@ -562,6 +565,9 @@ class DeoxysClient(object):
     def single_move_ee_trajectory_async(self, robot_index, ee_traj: List[Tuple[np.ndarray, np.ndarray]], *, cfg: Optional[Dict] = None, compliance_traj: Optional[List[np.ndarray]] = None, gripper_open: Optional[bool] = None, gripper_close: Optional[bool] = None, queued: bool = False):
         self.client.call('single_move_ee_trajectory_async', robot_index, ee_traj, cfg=cfg, compliance_traj=compliance_traj, gripper_open=gripper_open, gripper_close=gripper_close, queued=queued)
 
+    def get_gripper_state(self):
+        return self.client.call('get_gripper_state')[self.default_robot_index]
+
     def get_qpos(self):
         return self.client.call('get_all_qpos')[self.default_robot_index]
 
@@ -582,6 +588,9 @@ class DeoxysClient(object):
 
     def move_qpos_trajectory(self, q: List[np.ndarray], cfg: Optional[Dict] = None, num_addition_steps: int = 0, gripper_open: Optional[bool] = None, gripper_close: Optional[bool] = None, residual_tau_translation: Optional[np.ndarray] = None):
         self.client.call('single_move_qpos_trajectory', self.default_robot_index, q, cfg, num_addition_steps=num_addition_steps, gripper_open=gripper_open, gripper_close=gripper_close, residual_tau_translation=residual_tau_translation)
+
+    def move_qvel_trajectory(self, vel: List[np.ndarray], cfg: Optional[Dict] = None, num_addition_steps: int = 0, gripper_open: Optional[bool] = None, gripper_close: Optional[bool] = None):
+        self.client.call('single_move_qvel_trajectory', self.default_robot_index, vel, cfg, num_addition_steps=num_addition_steps, gripper_open=gripper_open, gripper_close=gripper_close)
 
     def move_ee_trajectory(self, ee_traj: List[Tuple[np.ndarray, np.ndarray]], *, cfg: Optional[Dict] = None, compliance_traj: Optional[List[np.ndarray]] = None, gripper_open: Optional[bool] = None, gripper_close: Optional[bool] = None):
         self.client.call('single_move_ee_trajectory', self.default_robot_index, ee_traj, cfg=cfg, compliance_traj=compliance_traj, gripper_open=gripper_open, gripper_close=gripper_close)

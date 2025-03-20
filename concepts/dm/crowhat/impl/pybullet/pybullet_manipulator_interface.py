@@ -49,6 +49,9 @@ class PyBulletSingleArmMotionPlanningInterface(SingleGroupMotionPlanningInterfac
     def get_ee_default_quat(self) -> Vec4f:
         return self._robot.get_ee_default_quat()
 
+    def get_ee_to_tool(self, tool_id: int) -> Tuple[Vec3f, Vec4f]:
+        return self._robot.get_ee_to_tool(tool_id)
+
     def _fk(self, qpos):
         return self._robot.fk(qpos)
 

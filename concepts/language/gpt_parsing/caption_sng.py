@@ -22,7 +22,7 @@ class CaptionSceneGraph(object):
 
 class CaptionSNGParser(object):
     def __init__(self, max_tokens: int = 1024):
-        self.prompt = load_prompt('gpt-35-turbo-chat-caption')
+        self.prompt = load_prompt('gpt-35-turbo-chat-caption', __file__)
         self.max_tokens = max_tokens
 
     def parse(self, sentence: str) -> Dict[str, Any]:

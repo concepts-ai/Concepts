@@ -35,3 +35,10 @@ Tutorials
    :caption: Relational Features and Relational Neural Networks
 
    tutorial/4-neural-logic/1-learning-family-relations
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Neural Symbolic Concept Learning
+
+   tutorial/5-neuro-symbolic-concept-learning/1-logic-enhanced-foundation-model
+

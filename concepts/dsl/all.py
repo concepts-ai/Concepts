@@ -46,10 +46,10 @@
 
 .. autosummary::
 
-    ~concepts.dsl.dsl_types.FunctionType
-    ~concepts.dsl.dsl_types.OverloadedFunctionType
-    ~concepts.dsl.dsl_types.FunctionTyping
-    ~concepts.dsl.dsl_types.Function
+    ~concepts.dsl.dsl_functions.FunctionType
+    ~concepts.dsl.dsl_functions.OverloadedFunctionType
+    ~concepts.dsl.dsl_functions.FunctionTyping
+    ~concepts.dsl.dsl_functions.Function
 
 .. rubric:: Domain
 

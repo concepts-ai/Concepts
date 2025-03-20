@@ -204,6 +204,36 @@ def euler2quat(euler):
     return quat
 
 
+def normalize_vector(vector: np.ndarray, eps: float = 1e-8):
+    vector_norm = np.linalg.norm(vector, axis=-1)
+    vector_norm[vector_norm < eps] = eps
+    return vector / vector_norm
+
+
+def compute_rotation_matrix_from_ortho6d(ortho6d: np.ndarray):
+    assert ortho6d.shape[-1] == 6
+    x_raw = ortho6d[..., 0:3]
+    y_raw = ortho6d[..., 3:6]
+
+    x = normalize_vector(x_raw)
+    z = np.cross(x, y_raw)
+    z = normalize_vector(z)
+    y = np.cross(z, x)
+    return np.concatenate((x[..., np.newaxis], y[..., np.newaxis], z[..., np.newaxis]), axis=-1)
+
+
+def ortho6d_to_rpy(ortho6d: np.ndarray):
+    assert ortho6d.shape[-1] == 6
+    rot_mat = compute_rotation_matrix_from_ortho6d(ortho6d)
+    return mat2euler(rot_mat)
+
+
+def rpy_to_ortho6d(rpy: np.ndarray):
+    assert rpy.shape[-1] == 3
+    rot_mat = euler2mat(rpy) # N 3 3
+    return np.concatenate((rot_mat[..., :, 0], rot_mat[..., :, 1]), axis=-1)
+
+
 def mat2euler(mat):
     """ Convert Rotation Matrix to Euler Angles.  See rotation.py for notes """
     mat = np.asarray(mat, dtype=np.float64)

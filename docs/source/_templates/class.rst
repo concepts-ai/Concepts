@@ -7,7 +7,7 @@
    :show-inheritance:
    :inherited-members: str, list, set, frozenset, dict, Module
    :undoc-members:
-   :special-members: __call__, __add__, __mul__, __div__, __floordiv__
+   :special-members: __call__, __add__, __mul__, __div__, __floordiv__, __getitem__, __len__, __iter__
 
    {% block methods %}
    {% if methods %}

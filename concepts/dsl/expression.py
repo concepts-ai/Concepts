@@ -1274,6 +1274,8 @@ class _PredicateValueExpression(Expression, ABC):
 
 
 class PredicateEqualExpression(ValueOutputExpression, _PredicateValueExpression):
+    """This function is obsolete and should be replaced by :class:`ValueCompareExpression`."""
+
     predicate: Union[VariableExpression, FunctionApplicationExpression]
     """The predicate expression."""
 

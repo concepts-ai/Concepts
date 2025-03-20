@@ -189,6 +189,11 @@ class CaptureRSSubscriber(object):
         if host is None:
             host = 'localhost'
 
+        try:
+            import zmq
+        except ImportError:
+            raise ImportError('zmq is not installed. Please install it using `pip install zmq`')
+
         context = zmq.Context()
         self.host = host
         self.port = port

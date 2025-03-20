@@ -11,15 +11,17 @@
 import re
 import os.path as osp
 import functools
-from typing import Union, List, Dict
+from typing import Optional, Union, List, Dict
 
 
 class ParsingFailedError(Exception):
     pass
 
 
-def load_prompt(identifier) -> List[Dict[str, str]]:
-    prompt_filename = osp.join(osp.dirname(__file__), 'prompts', identifier + '.txt')
+def load_prompt(identifier, filename: Optional[str] = None) -> List[Dict[str, str]]:
+    if filename is None:
+        filename = __file__
+    prompt_filename = osp.join(osp.dirname(filename), 'prompts', identifier + '.txt')
     with open(prompt_filename, 'r') as f:
         content = f.read()
         return [

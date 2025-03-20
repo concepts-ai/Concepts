@@ -232,8 +232,8 @@ class PlanningWorldInterface(object):
             client: BulletClient = self.client
             collisions = list()
             for c in contacts:
-                name1 = client.world.get_link_name(c.body_a, c.link_a)
-                name2 = client.world.get_link_name(c.body_b, c.link_b)
+                name1 = client.world.get_link_name(c.body_a, c.link_a, trim_body_name=False)
+                name2 = client.world.get_link_name(c.body_b, c.link_b, trim_body_name=False)
                 collisions.append((name1, name2, c.contact_distance))
             if len(collisions) > 0:
                 print(jacinle.tabulate(collisions, headers=['Object 1', 'Object 2', 'Distance']))

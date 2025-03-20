@@ -421,7 +421,7 @@ def sample_indirect_push_with_support(
             object_point_normal = -np.asarray(object_pcd.normals[object_index])  # point inside
 
             tool_point_pos = np.asarray(tool_pcd.points[tool_index])
-            tool_point_normal = np.asarray(tool_pcd.normals[tool_index])  # point outside (towards the tool)            
+            tool_point_normal = np.asarray(tool_pcd.normals[tool_index])  # point outside (towards the tool)
 
             # Solve for a quaternion that aligns the tool normal with the object normal
             for rotation_quat_xyzw in enumerate_quaternion_from_vectors(tool_point_normal, object_point_normal, 4):

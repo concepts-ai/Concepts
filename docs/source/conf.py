@@ -13,6 +13,9 @@
 import sys
 from os.path import dirname
 
+# import concepts.dsl
+# import concepts.dm.crow
+
 sys.path.insert(0, dirname(dirname(dirname(__file__))))
 
 
@@ -91,3 +94,8 @@ html_show_sourcelink = False  # Remove 'view source code' from top of page (for 
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
+# Mock imports
+autodoc_mock_imports = [
+    'open3d', 'trimesh', 'sapien', 'sapien2', 'pybullet', 'pytorch3d', 'bpy', 'deoxys', 'mplib', 'dynamixel_sdk', 'mani_skill2', 'bidict', 'mani_skill', 'pygame', 'rby1_sdk',
+    'magic'
+]

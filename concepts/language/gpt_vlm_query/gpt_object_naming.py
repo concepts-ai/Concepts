@@ -11,7 +11,7 @@
 import numpy as np
 import cv2
 import base64
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 from concepts.language.gpt_vlm_query.gpt_image_query_utils import draw_masks
 from concepts.language.openai_utils.default_client import get_default_client
@@ -19,7 +19,7 @@ from concepts.language.openai_utils.llm_prompting_utils import extract_tag, Pars
 
 
 @auto_retry(5)
-def get_object_names(image: np.ndarray, masks: List[np.ndarray], class_names: List[str], client=None) -> List[str]:
+def get_object_names(image: np.ndarray, masks: List[np.ndarray], class_names: Optional[List[str]]=None, client=None) -> List[str]:
     """Get the object names from the given image and masks.
 
     Args:
@@ -36,7 +36,8 @@ def get_object_names(image: np.ndarray, masks: List[np.ndarray], class_names: Li
 
     instruction = 'I have provided an image with masks. Please identify the object that is represented by each mask.\n'
     instruction += 'One mask corresponds to a single object. Your output should be multiple lines, each line corresponding to a mask of the format <name>{object_name}</name>.\n'
-    instruction += 'Choose the names from the following list: ' + ', '.join(class_names) + '.\n'
+    if class_names is not None:
+        instruction += 'Choose the names from the following list: ' + ', '.join(class_names) + '.\n'
     instruction += 'There are ' + str(len(masks)) + ' masks in the image.'
 
     visualization = draw_masks(image, masks)

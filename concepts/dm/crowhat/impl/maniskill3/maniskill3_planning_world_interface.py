@@ -1,7 +1,6 @@
 from typing import Any, Iterator, Optional, Union, Tuple, List, Generic, TypeVar, cast
 
 import numpy as np
-from bidict import bidict
 from sapien import Scene, Pose, Entity
 from sapien.pysapien.physx import PhysxArticulation, PhysxArticulationJoint, PhysxCpuSystem, PhysxContactPoint
 
@@ -16,7 +15,7 @@ from mani_skill.utils.sapien_utils import get_pairwise_contacts
 K = TypeVar('K')
 V = TypeVar('V')
 
-class _Name2Pointer(bidict[K, V], Generic[K, V]):
+class _Name2Pointer(Generic[K, V]):
     pass
 
 

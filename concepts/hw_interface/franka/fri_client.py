@@ -10,7 +10,7 @@
 
 import atexit
 import itertools
-from typing import Optional, Union, List
+from typing import Optional, Union, Tuple, List
 
 import numpy as np
 import cv2

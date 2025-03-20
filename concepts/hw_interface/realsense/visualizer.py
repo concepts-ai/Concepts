@@ -16,9 +16,7 @@ import time
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, List
-
-if TYPE_CHECKING:
-    from concepts.hw_interface.realsense.device import RealSenseInterface, get_concat_rgbd_visualization
+from concepts.hw_interface.realsense.device import RealSenseInterface, get_concat_rgbd_visualization
 
 __all__ = ['WindowEvent', 'RealSenseVisualizer', 'visualize_devices', 'run_4corner_calibration']
 
@@ -31,7 +29,7 @@ class WindowEvent(Enum):
 
 class RealSenseVisualizer(object):
     def __init__(self, device):
-        self.device: 'RealSenseInterface' = device
+        self.device: RealSenseInterface = device
 
     def run(self, save_dir: str = "", save_image: bool = False) -> WindowEvent:
         """Visualize color and depth images in a cv2 window.
@@ -147,7 +145,7 @@ class RealSenseStreamVisualizer(object):
         self.close()
 
 
-def visualize_devices(devices: List['RealSenseInterface'], save_dir: str = "") -> None:
+def visualize_devices(devices: List[RealSenseInterface], save_dir: str = "") -> None:
     """Visualizes all the devices in a cv2 window. Press 'q' or 'esc' on any of the windows to exit the infinite loop.
     Press the 's' key in a specific window to save the color and depth image to disk.
     You can use a similar loop interface in other places where you need a live camera feed (e.g. collecting demonstrations).
@@ -173,7 +171,7 @@ def visualize_devices(devices: List['RealSenseInterface'], save_dir: str = "") -
             break
 
 
-def run_4corner_calibration(devices: List['RealSenseInterface'], save_dir: str = "") -> None:
+def run_4corner_calibration(devices: List[RealSenseInterface], save_dir: str = "") -> None:
     while True:
         should_exit = False
 

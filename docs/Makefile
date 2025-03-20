@@ -22,4 +22,4 @@ clean:
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-	rsync -aP --delete $(BUILDDIR)/html droplet.jiayuanm.com:~/concepts_docs/
+	rsync -aP $(BUILDDIR)/html droplet.jiayuanm.com:~/concepts_docs/
