@@ -9,18 +9,20 @@
 # Distributed under terms of the MIT license.
 
 import numpy as np
-from typing import Any, Iterator, Optional, Union, Tuple, List
+from typing import Any, Iterator, Optional, Union, Tuple, List, TYPE_CHECKING
 
 from concepts.dm.crowhat.world.planning_world_interface import GeometricContactInfo, PlanningWorldInterface
 from concepts.math.cad.mesh_utils import open3d_mesh_to_trimesh
 from concepts.simulator.pybullet.client import BulletClient
 from concepts.simulator.pybullet.world import WorldSaverBuiltin
-from concepts.simulator.mplib.client import MPLibClient
 from concepts.utils.typing_utils import Open3DPointCloud, Open3DTriangleMesh, Trimesh, Vec3f, Vec4f
+
+if TYPE_CHECKING:
+    from concepts.simulator.mplib.client import MPLibClient
 
 
 class PyBulletPlanningWorldInterface(PlanningWorldInterface):
-    def __init__(self, client: BulletClient, mplib_client: Optional[MPLibClient] = None):
+    def __init__(self, client: BulletClient, mplib_client: Optional['MPLibClient'] = None):
         self._client = client
         self._mplib_client = mplib_client
         self._ignored_collision_pairs = list()
@@ -30,7 +32,7 @@ class PyBulletPlanningWorldInterface(PlanningWorldInterface):
         return self._client
 
     @property
-    def mplib_client(self) -> Optional[MPLibClient]:
+    def mplib_client(self) -> Optional['MPLibClient']:
         return self._mplib_client
 
     def add_ignore_collision_pair_by_id(self, body_a, link_a, body_b, link_b):

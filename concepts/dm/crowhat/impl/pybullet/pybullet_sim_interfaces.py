@@ -19,7 +19,8 @@ import tempfile
 import shutil
 import atexit
 import queue
-from typing import Any, Optional, Callable, Tuple, TYPE_CHECKING
+import numpy as np
+from typing import Any, Optional, Callable, Tuple, List, Dict, TYPE_CHECKING
 
 from jacinle.utils.printing import colored
 from jacinle.utils.network import get_free_port
@@ -167,6 +168,21 @@ class PyBulletRemoteService(Service):
                     pass
             os.dup2(os.open(redirect_stderr, os.O_WRONLY), 2)
 
+    def get_camera_images(self, camera_names: Optional[List[str]] = None) -> Dict[str, Dict[str, np.ndarray]]:
+        images = self._controller.bullet_client.world.render_images_names(camera_names)
+        rv = dict()
+        for name, image_tuple in images.items():
+            rgb, depth, seg = image_tuple
+            camera_config = self._controller.bullet_client.world.get_camera_config(name)
+            rv[name] = {
+                'color': rgb,
+                'depth': depth,
+                'segmentation': seg,
+                'intrinsics': camera_config.get_intrinsics_matrix(),
+                'extrinsics': camera_config.get_extrinsics_matrix(),
+            }
+        return rv
+
     def mainloop(self, *, redirect_stdout: str = '/dev/null', redirect_stderr: str = '/dev/null'):
         # self._redirect_output(redirect_stdout, redirect_stderr)
         while True:
@@ -181,6 +197,8 @@ class PyBulletRemoteService(Service):
             try:
                 if action_name == '__get_scene__':
                     result_q.put({'status': 'done', 'scene': self._controller.bullet_client.world.save_world()})
+                elif action_name == '__get_image__':
+                    result_q.put({'status': 'done', 'images': self.get_camera_images(*args, **kwargs)})
                 else:
                     if self._dry_run:
                         print('Dry run:', action_name, args, kwargs)
@@ -209,6 +227,13 @@ class PyBulletRemotePerceptionInterface(CrowPerceptionInterface):
             return rv['scene']
         else:
             raise RuntimeError(f"Failed to get scene: {rv}")
+
+    def get_camera_images(self, camera_names: Optional[List[str]] = None) -> Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        rv = self._client.call('__get_image__', camera_names)
+        if rv['status'] == 'done':
+            return rv['images']
+        else:
+            raise RuntimeError(f"Failed to get image: {rv}")
 
     def register_bullet_client(self, bullet_client: BulletClient):
         self._bullet_client = bullet_client

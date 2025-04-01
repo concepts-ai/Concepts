@@ -54,6 +54,18 @@ class CameraConfig(collections.namedtuple('_CameraConfig', ['image_size', 'intri
         aspect_ratio = float(image_size[1]) / image_size[0]
         return p.computeProjectionMatrixFOV(fovh, aspect_ratio, znear, zfar)
 
+    def get_intrinsics_matrix(self) -> np.ndarray:
+        return np.array(self.intrinsics).reshape(3, 3)
+
+    def get_extrinsics_matrix(self) -> np.ndarray:
+        rotation = p.getMatrixFromQuaternion(rpy(*self.rotation))
+        rotm = np.float32(rotation).reshape(3, 3)
+        position = np.array(self.position)
+        transform = np.eye(4)
+        transform[:3, :3] = rotm
+        transform[:3, 3] = position
+        return transform
+
 
 class RealSenseD415(object):
     """Default configuration with 3 RealSense RGB-D cameras."""

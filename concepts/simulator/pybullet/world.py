@@ -514,6 +514,7 @@ class BulletWorld(object):
         self.body_groups: Dict[str, List[int]] = dict()
         self.managed_interfaces: Dict[str, Any] = dict()
         self.additional_state_savers: Dict[str, Callable[[], BulletSaver]] = dict()
+        self.camera_configs: Dict[str, CameraConfig] = dict()
 
         self.cached_geometries: Dict[Tuple[int, str], Any] = dict()
 
@@ -543,6 +544,9 @@ class BulletWorld(object):
 
     additional_state_savers: Dict[str, Callable[[], BulletSaver]]
     """The mapping from identifiers to additional state savers."""
+
+    camera_configs: Dict[str, CameraConfig]
+    """The mapping from camera name to camera config."""
 
     def set_client_id(self, client_id):
         self.client_id = client_id
@@ -623,7 +627,6 @@ class BulletWorld(object):
                 self.link_names.add_int_to_string((body_id, j), body_name + '/' + link_name)
                 self.global_names.add_int_to_string(('link', body_id, j), link_name)
                 self.global_names.add_int_to_string(('link', body_id, j), body_name + '/' + link_name)
-
 
     def get_body_names(self):
         return self.body_names.int_to_string.values()
@@ -1048,7 +1051,24 @@ class BulletWorld(object):
             return BodyFullStateSaver(self, self.body_names[body_identifier])
 
     def save_bodies(self, body_identifiers: List[Union[str, int]]) -> GroupSaver:
-        return GroupSaver([self.save_body(b) for b in body_identifiers])
+        return GroupSaver(self.client_id, [self.save_body(b) for b in body_identifiers])
+
+    def add_camera_config(self, name: str, config: CameraConfig):
+        """Add a camera config to the world."""
+        if name in self.camera_configs:
+            raise ValueError(f'Camera config with name {name} already exists.')
+        self.camera_configs[name] = config
+
+    def remove_camera_config(self, name: str):
+        """Remove a camera config from the world."""
+        if name not in self.camera_configs:
+            raise ValueError(f'Camera config with name {name} does not exist.')
+        del self.camera_configs[name]
+
+    def get_camera_config(self, name: str) -> CameraConfig:
+        if name not in self.camera_configs:
+            raise ValueError(f'Camera config with name {name} does not exist.')
+        return self.camera_configs[name]
 
     def render_image(self, config: CameraConfig, image_size: Optional[Tuple[int, int]] = None, normalize_depth: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         view_matrix, proj_matrix = config.get_view_and_projection_matricies(image_size)
@@ -1063,7 +1083,8 @@ class BulletWorld(object):
             projectionMatrix=proj_matrix,
             shadow=1,
             flags=p.ER_SEGMENTATION_MASK_OBJECT_AND_LINKINDEX,
-            renderer=p.ER_BULLET_HARDWARE_OPENGL
+            renderer=p.ER_BULLET_HARDWARE_OPENGL,
+            physicsClientId=self.client_id,
         )
 
         # Get color image.
@@ -1085,6 +1106,28 @@ class BulletWorld(object):
         segm = np.uint8(segm).reshape(depth_image_size)
 
         return color, depth, segm
+
+    def render_images_names(self, camera_names: Optional[List[str]] = None) -> Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        if camera_names is None:
+            camera_names = list(self.camera_configs.keys())
+
+        images = dict()
+        for name in camera_names:
+            if name not in self.camera_configs:
+                raise ValueError(f'Camera config with name {name} does not exist.')
+            images[name] = self.render_image(self.camera_configs[name])
+
+        return images
+
+    def render_images_dict(self, configs: Optional[Dict[str, CameraConfig]] = None) -> Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        if configs is None:
+            configs = self.camera_configs
+
+        images = dict()
+        for name, config in configs.items():
+            images[name] = self.render_image(config)
+
+        return images
 
     def get_pointcloud(self, body_id: int, points_per_geom: int = 1000, zero_center: bool = True, use_visual_shape: bool = False) -> np.ndarray:
         """Get the point cloud of a body."""
