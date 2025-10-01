@@ -23,7 +23,8 @@ from concepts.dm.crow.controller import CrowControllerApplicationExpression
 from concepts.dm.crow.crow_generator import CrowGeneratorApplicationExpression
 
 __all__ = [
-    'CrowBehaviorBodyPrimitiveBase', 'CrowBehaviorCommit', 'CrowAchieveExpression', 'CrowUntrackExpression', 'CrowMemQueryExpression', 'CrowBindExpression', 'CrowAssertExpression', 'CrowRuntimeAssignmentExpression', 'CrowFeatureAssignmentExpression',
+    'CrowBehaviorBodyPrimitiveBase', 'CrowBehaviorCommit', 'CrowAchieveExpression', 'CrowUntrackExpression', 'CrowMemQueryExpression', 'CrowBindExpression',
+    'CrowAssertExpression', 'CrowRuntimeAssignmentExpression', 'CrowFeatureAssignmentExpression',
     'CrowBehaviorBodySuiteBase', 'CrowBehaviorConditionSuite', 'CrowBehaviorWhileLoopSuite', 'CrowBehaviorForeachLoopSuite', 'CrowBehaviorStatementOrdering', 'CrowBehaviorOrderingSuite',
     'CrowBehaviorBodyItem', 'CrowBehavior', 'CrowBehaviorApplier', 'CrowBehaviorApplicationExpression', 'CrowBehaviorEffectApplicationExpression',
     'CrowEffectApplier'
@@ -53,10 +54,11 @@ class CrowBehaviorBodyPrimitiveBase(object):
 
 
 class CrowBehaviorCommit(CrowBehaviorBodyPrimitiveBase):
-    def __init__(self, sketch: bool = True, csp: bool = True, execution: bool = False):
+    def __init__(self, sketch: bool = True, csp: bool = True, execution: bool = True, effects: Optional['CrowBehaviorOrderingSuite'] = None):
         self.sketch = sketch
         self.csp = csp
         self.execution = execution
+        self.effects = effects
 
     execution: bool
     """Whether to commit the execution: the execution is always going to achieve the subgoal."""
@@ -67,6 +69,9 @@ class CrowBehaviorCommit(CrowBehaviorBodyPrimitiveBase):
     csp: bool
     """Whether to commit the CSP variables: the CSP is always going to achieve the subgoal."""
 
+    effects: Optional['CrowBehaviorOrderingSuite'] = None
+    """The effects section associated with the commit."""
+
     @property
     def flags(self):
         return dict(sketch=self.sketch, csp=self.csp, execution=self.execution)
@@ -76,7 +81,9 @@ class CrowBehaviorCommit(CrowBehaviorBodyPrimitiveBase):
         return ', '.join(f'{key}={value}' for key, value in self.flags.items())
 
     def __str__(self):
-        return f'Commit({self.flags_str})'
+        if self.effects is None:
+            return f'Commit({self.flags_str})'
+        return f'Commit({self.flags_str}){{\n{indent_text(str(self.effects))}\n}}'
 
     def __repr__(self):
         return str(self)

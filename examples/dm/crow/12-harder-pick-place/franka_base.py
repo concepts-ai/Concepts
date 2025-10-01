@@ -8,7 +8,7 @@
 # This file is part of Project Concepts.
 # Distributed under terms of the MIT license.
 
-from typing import Optional, Union, Tuple, List
+from typing import List
 
 import numpy as np
 import torch

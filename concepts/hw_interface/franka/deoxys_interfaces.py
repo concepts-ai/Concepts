@@ -10,7 +10,7 @@
 
 import os.path as osp
 
-from typing import Union, Sequence, Dict
+from typing import Optional, Union, Sequence, Dict
 from functools import lru_cache
 
 from deoxys import config_root
@@ -92,9 +92,9 @@ def get_franka_interface_dict(robots: Sequence[int], wait_for_state: bool = True
     return interfaces
 
 
-def get_realsense_capture(camera_name: str, auto_close: bool = False, skip_frames: int = 0, subscriber: bool = False) -> Union[CaptureRS, CaptureRSSubscriber]:
+def get_realsense_capture(camera_name: str, auto_close: bool = False, skip_frames: int = 0, subscriber: Optional[bool] = None) -> Union[CaptureRS, CaptureRSSubscriber]:
     camera = get_camera_config_by_name(camera_name)
-    if CaptureRSSubscriber.has_camera_publisher(camera_name) or subscriber:
+    if CaptureRSSubscriber.has_camera_publisher(camera_name) and subscriber is None or subscriber is True:
         if camera.get('pub_port') is not None:
             capture = CaptureRSSubscriber(
                 host=camera.get('pub_host', None),
@@ -110,7 +110,7 @@ def get_realsense_capture(camera_name: str, auto_close: bool = False, skip_frame
     return capture
 
 
-def get_realsense_capture_dict(cameras: Sequence[str], auto_close: bool = False, skip_frames: int = 0, subscriber: bool = False) -> Dict[str, Union[CaptureRS, CaptureRSSubscriber]]:
+def get_realsense_capture_dict(cameras: Sequence[str], auto_close: bool = False, skip_frames: int = 0, subscriber: Optional[bool] = None) -> Dict[str, Union[CaptureRS, CaptureRSSubscriber]]:
     captures = {}
     for camera_name in cameras:
         captures[camera_name] = get_realsense_capture(camera_name, auto_close=auto_close, skip_frames=skip_frames, subscriber=subscriber)

@@ -128,6 +128,39 @@ class BulletClient(object):
 
         self._nonphysics_step_callbacks = []
 
+    is_gui: bool
+    """Whether the client is in GUI mode."""
+
+    fps: int
+    """The physics simulation FPS. The physical stepping time is 1.0 / fps seconds."""
+
+    render_fps: int
+    """The rendering FPS. If this is set to 0, the rendering will be disabled."""
+
+    enable_realtime_rendering: bool
+    """Whether to enable realtime rendering."""
+
+    enable_debug_gui: bool
+    """Whether to enable the debug GUI elements."""
+
+    gravity: Tuple[float, float, float]
+    """The gravity vector. This is a tuple of three floats (x, y, z)."""
+
+    assets_root: str
+    """The root directory of the assets. This is used to load URDF and SDF files."""
+
+    width: Optional[int]
+    """The width of the window. If this is set to None, the default width will be used."""
+
+    height: Optional[int]
+    """The height of the window. If this is set to None, the default height will be used."""
+
+    w: BulletWorld
+    """The world object that contains all the bodies and joints."""
+
+    p: BulletP
+    """The pybullet client wrapper that provides access to the pybullet API."""
+
     debug_items: Dict[str, Union[int, Tuple[int, ...]]]
     """The debug items that are added to the world. The key is the name of the item, and the value is the item id."""
 

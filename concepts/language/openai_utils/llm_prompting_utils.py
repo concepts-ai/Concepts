@@ -12,6 +12,7 @@ import re
 import os.path as osp
 import functools
 from typing import Optional, Union, List, Dict
+from jacinle.utils.meta import UNSET
 
 
 class ParsingFailedError(Exception):
@@ -53,7 +54,26 @@ def extract_tag(content: str, tag: str, unique: bool = False) -> Union[str, List
         return matches
 
 
-def auto_retry(nr_retries: int):
+def extract_code_block(content: str, unique: bool = False) -> Union[str, List[str]]:
+    """Extract all matched content inside ```...```.
+
+    Args:
+        content: the input string.
+        unique: if True, only return the first matched content and raises an error.
+    """
+
+    pattern = r'```.*?```'
+    matches = re.findall(pattern, content, re.DOTALL)
+
+    if unique:
+        if len(matches) != 1:
+            raise TagNotUniqueError('Code block is not unique. Content: {}'.format(content))
+        return matches[0]
+    else:
+        return matches
+
+
+def auto_retry(nr_retries: int, default=UNSET):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -62,6 +82,8 @@ def auto_retry(nr_retries: int):
                     return func(*args, **kwargs)
                 except ParsingFailedError:
                     if i == nr_retries - 1:
+                        if default is not UNSET:
+                            return default
                         raise
                 except Exception as e:
                     if i == nr_retries - 1:

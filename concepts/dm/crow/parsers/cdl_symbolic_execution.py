@@ -302,6 +302,9 @@ class FunctionCallSymbolicExecutor(object):
                 self.behavior_expressions.append(CrowAssertExpression(term, **item.annotations if item.annotations is not None else dict()))
             elif item.name == 'commit':
                 self.behavior_expressions.append(CrowBehaviorCommit(**item.annotations if item.annotations is not None else dict()))
+            elif item.name == 'commit_with':
+                import ipdb; ipdb.set_trace()
+                self.behavior_expressions.append(CrowBehaviorCommit(effects=item.args[0], **item.annotations if item.annotations is not None else dict()))
             elif item.name == 'return':
                 assert isinstance(item.args.arguments[0], (E.ValueOutputExpression, E.VariableExpression)), f'Invalid return expression: {item.args.arguments[0]}'
                 self.return_expression = _make_conditional_return(current_return_statement, current_return_statement_condition_neg, self._g(item.args.arguments[0]))
@@ -626,7 +629,7 @@ class FunctionCallSymbolicExecutor2(object):
                         (E.ValueOutputExpression, E.VariableExpression, CrowGeneratorApplicationExpression)
                     ), f'Invalid expr expression: {item.args.arguments[0]}'
                     self.set_unique_return(self._replace_variables(item.args.arguments[0]))
-            elif item.name in ('bind', 'mem_query', 'untrack', 'assert', 'commit'):
+            elif item.name in ('bind', 'mem_query', 'untrack', 'assert', 'commit', 'commit_with'):
                 if not self.mode.support_misc_behavior_body_statements:
                     raise ValueError(f'Behavior body statement {item} are not allowed in the current mode: {self.mode}')
                 if item.name == 'bind':
@@ -644,6 +647,8 @@ class FunctionCallSymbolicExecutor2(object):
                     self.statements.append(CrowAssertExpression(term, **annotations))
                 elif item.name == 'commit':
                     self.statements.append(CrowBehaviorCommit(**annotations))
+                elif item.name == 'commit_with':
+                    self.statements.append(CrowBehaviorCommit(effects=item.args.arguments[0], **annotations))
             elif item.name in ('achieve', 'pachieve'):
                 if not self.mode.support_achieve_statements:
                     raise ValueError(f'Achieve statements are not allowed in the current mode: {self.mode}')

@@ -283,7 +283,7 @@ def format_scope_constraints(scope_constraints: Dict[int, Tuple[Tuple[ValueOutpu
 def execute_effect_statements(
     executor: CrowExecutor, statements: Sequence[Union[CrowFeatureAssignmentExpression, CrowBehaviorForeachLoopSuite, CrowBehaviorConditionSuite]],
     state: CrowState, csp: Optional[ConstraintSatisfactionProblem] = None,
-    scope: Optional[dict] = None, state_index: Optional[int] = None
+    scope: Optional[dict] = None, state_index: Optional[int] = None,
 ):
     if scope is None:
         scope = dict()
@@ -319,9 +319,12 @@ def execute_effect_statements(
             raise ValueError(f'Unsupported statement type: {type(stmt)}')
 
 
-def execute_behavior_effect_body(executor: CrowExecutor, behavior: Union[CrowBehavior, CrowController], state: CrowState, scope: dict, csp: Optional[ConstraintSatisfactionProblem] = None, state_index: Optional[int] = None) -> CrowState:
+def execute_behavior_effect_body(executor: CrowExecutor, behavior: Union[CrowBehavior, CrowController], state: CrowState, scope: dict, csp: Optional[ConstraintSatisfactionProblem] = None, state_index: Optional[int] = None, commit_operator: Optional[CrowBehaviorCommit] = None) -> CrowState:
     """Execute a behavior effect with for-loops and conditional statements."""
     new_state = state.clone()
+    statements = behavior.effect_body.statements
+    if commit_operator is not None and commit_operator.effects is not None:
+        statements = statements + commit_operator.effects.statements
     execute_effect_statements(executor, behavior.effect_body.statements, new_state, csp=csp, scope=scope, state_index=state_index)
     return new_state
 

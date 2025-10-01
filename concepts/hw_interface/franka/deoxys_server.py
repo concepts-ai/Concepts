@@ -29,8 +29,7 @@ from concepts.math.rotationlib_xyzw import quat2axisangle_xyzw, mat2pos_quat_xyz
 deoxys_available = True
 try:
     from deoxys.franka_interface import FrankaInterface
-    from deoxys.experimental.motion_utils import reset_joints_to_v1
-    from deoxys.experimental.motion_utils import reset_joints_to_v2, follow_joint_traj, follow_ee_traj, open_gripper, close_gripper
+    from deoxys.experimental.motion_utils import reset_joints_to_v2, follow_joint_traj, follow_ee_traj, open_gripper, close_gripper, execute_jointvel_traj
     from deoxys.utils.config_utils import verify_controller_config, get_default_controller_config
     from deoxys.utils.yaml_config import YamlConfig
 except ImportError:
@@ -82,7 +81,7 @@ class DeoxysService(Service):
         super().__init__(configs=dict(), spec={'available_robots': list(self.robots.keys()), 'available_cameras': list(self.cameras.keys())})
 
     @classmethod
-    def from_setup_name(cls, name: str, robot_configs: Optional[Dict[str, np.ndarray]], camera_configs: Optional[Dict[str, Dict[str, np.ndarray]]] = None, mock: bool = False, use_camera_subscriber: bool = False):
+    def from_setup_name(cls, name: str, robot_configs: Optional[Dict[str, np.ndarray]], camera_configs: Optional[Dict[str, Dict[str, np.ndarray]]] = None, mock: bool = False, use_camera_subscriber: Optional[bool] = None):
         from concepts.hw_interface.franka.deoxys_interfaces import get_franka_interface_dict, get_realsense_capture_dict, get_setup_config
         from concepts.hw_interface.franka.deoxys_interfaces import get_robot_config_content_by_index
 
@@ -219,6 +218,16 @@ class DeoxysService(Service):
 
         self.wait_async_thread(robot_index)
         follow_joint_traj(self.robots[robot_index], q, num_addition_steps=num_addition_steps, controller_cfg=cfg, gripper_open=gripper_open, gripper_close=gripper_close)
+
+    def single_move_qvel_trajectory(self, robot_index: int, vel: List[np.ndarray], cfg: Optional[Dict] = None, num_addition_steps: int = 0, gripper_open: Optional[bool] = None, gripper_close: Optional[bool] = None):
+        if self.mock:
+            return print(f'DeoxysService::follow_joint_traj(robot_index={robot_index!r}, q={vel!r}, num_addition_steps={num_addition_steps}, controller_cfg={cfg!r})')
+        if cfg is None:
+            cfg = get_default_controller_config('JOINT_VELOCITY')
+        cfg = deepcopy(cfg)
+        cfg = verify_controller_config(cfg, use_default=True)
+        self.wait_async_thread(robot_index)
+        execute_jointvel_traj(self.robots[robot_index], vel, controller_cfg=cfg, gripper_open=gripper_open, gripper_close=gripper_close)
 
     def single_async_servo_start(self, robot_index: int):
         if robot_index in self.async_threads:
@@ -467,7 +476,7 @@ def _canonicalize_follow_traj_args(cfg, joint_trajectory, gripper_open, gripper_
         cfg.enable_residual_tau = True
         cfg.residual_tau_translation_vec = residual_tau_translation
     gripper_open, gripper_close = _canonicalize_gripper_open_close(gripper_open, gripper_close, default=gripper_default)
-    if type(gripper_close) is not bool:
+    if isinstance(gripper_close, np.ndarray) or isinstance(gripper_close, list):
         gripper_close_list = gripper_close
     else:
         gripper_close_list = [gripper_close for _ in joint_trajectory]

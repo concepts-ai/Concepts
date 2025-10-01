@@ -982,6 +982,14 @@ class CDLExpressionInterpreter(Interpreter):
         return FunctionCall('commit', ArgumentsList(tuple()), kwargs)
 
     @inline_args
+    def commit_with_suite(self, kwargs: dict, effect):
+        """Commit with a suite."""
+        suite = self.visit(effect)
+        suite = suite.get_effect_statements()
+        effect = CrowBehaviorOrderingSuite.make_sequential(*suite)
+        return FunctionCall('commit_with', ArgumentsList((effect, )), kwargs)
+
+    @inline_args
     def achieve_once_stmt(self, value: CSList):
         return FunctionCall('achieve', ArgumentsList(_canonicalize_arguments(self.visit(value).items, BOOL)), {'once': True})
 

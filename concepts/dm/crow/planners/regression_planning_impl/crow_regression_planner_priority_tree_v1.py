@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 import jacinle
 from jacinle.storage.unsafe_queue import PriorityQueue
+from jacinle.utils.printing import indent_text
 from jacinle.utils.meta import UNSET
 
 from concepts.dsl.constraint import ConstraintSatisfactionProblem, OptimisticValue
@@ -62,6 +63,19 @@ class PriorityTreeNodeData(NamedTuple):
     @classmethod
     def make_empty(cls, state, middle, minimize: Optional[ValueOutputExpression]) -> 'PriorityTreeNodeData':
         return cls(CrowPlanningResult3.make_empty(state), tuple(), middle, tuple(), minimize)
+
+    @classmethod
+    def from_sequential_program(cls, result: CrowPlanningResult3, sequential_program: Tuple[ScopedCrowExpression, ...], minimize: Optional[ValueOutputExpression] = None) -> 'PriorityTreeNodeData':
+        """Create a PriorityTreeNodeData from a sequential program.
+
+        Args:
+            state: the state to use.
+            sequential_program: the sequential program to use.
+
+        Returns:
+            a PriorityTreeNodeData object.
+        """
+        return cls(result, tuple(), None, sequential_program, minimize)
 
     def clone(self, result=UNSET, left=UNSET, middle=UNSET, right=UNSET, minimize=UNSET) -> 'PriorityTreeNodeData':
         return PriorityTreeNodeData(
@@ -117,12 +131,14 @@ class PriorityTreeNodeData(NamedTuple):
                 yield new_data, stmt, middle, scope_id
             return
 
-    def short_str(self):
+    def short_str(self, id_string=None):
+        if id_string is None:
+            id_string = f'@{hex(id(self))}'
         action_string = '[' + '; '.join(str(x) for x in self.result.controller_actions) + ']'
         left_string = '[' + '; '.join(re.sub(r'\n\s*', ' ', format_regression_statement(x, self.result.scopes)) for x in self.left) + ']'
         middle_string = str(self.middle).replace('\n', ' ') if self.middle is not None else '<None>'
         right_string = '[' + '; '.join(re.sub(r'\n\s*', ' ', format_regression_statement(x, self.result.scopes)) for x in self.right) + ']'
-        return f'@{hex(id(self))} A={action_string} L={left_string}, M={middle_string}, R={right_string}'
+        return f'{id_string} A={action_string} L={left_string}, M={middle_string}, R={right_string}'
 
 
 @dataclass
@@ -159,6 +175,33 @@ class PriorityTreeNode(object):
                 yield expr, -1, parent_node
             else:
                 yield expr.statement, expr.scope_id, parent_node
+
+    def short_str(self):
+        return self.data.short_str(f'@{hex(id(self))}')
+
+    def long_str(self, top_down: bool = False):
+        """Generate a string representation of the node by traversing the ndoe towards the root node."""
+        data_string = self.data.short_str()
+
+        node = self
+        string = data_string
+        level = 0
+        while True:
+            if len(node.parents) == 0:
+                return string
+
+            level += 1
+            edge, parent = node.parents[0]
+            edge_string = 'Edge:' + (str(edge) if edge is not None else '<None>')
+            id_string = f'@{hex(id(node))}'
+            if top_down:
+                string = f'{node.data.short_str(id_string)}\n{edge_string}\n{indent_text(string)}'
+            else:
+                string = f'{string}\n{indent_text(edge_string, level)}\n{indent_text(parent.data.short_str(id_string), level)}'
+
+            node = parent
+
+        return string
 
 
 @dataclass
@@ -249,8 +292,6 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
 
     _queue: PriorityQueue
 
-    """Whether to always commit the skeleton of the program."""
-
     enable_state_hash: bool
     """Whether to enable the state hash."""
 
@@ -297,20 +338,38 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
 
         self._root = self._push_node(None, root_data, None)
 
-        try:
-            while not self._queue.empty():
-                node, result = self._pop_node()
-                self._search_stat['nr_expanded_nodes'] += 1
+        while True:
+            try:
+                while not self._queue.empty():
+                    node, result = self._pop_node()
+                    self._search_stat['nr_expanded_nodes'] += 1
 
-                if result is not None:
-                    self._expand_result(node, result)
-                else:
-                    self._expand_node(node)
-        except _SolutionFound:
-            pass
+                    if result is not None:
+                        self._expand_result(node, result)
+                    else:
+                        self._expand_node(node)
+            except _SolutionFound:
+                pass
+
+            if self._results is None:
+                break
+
+            if self._results is not None and len(self._results) > 0:
+                if len(self._results[0].controller_actions) == 0:
+                    break
+
+                if not isinstance(self._results[0].controller_actions[0], PriorityTreeNodeData):
+                    break
+
+                first_node = self._results[0].controller_actions[0]
+                assert isinstance(first_node, PriorityTreeNodeData), f'Expected first_node to be a PriorityTreeNodeData, but got {type(first_node)}.'
+
+                raise NotImplementedError('GG')
 
         if self._results is not None:
             return [x.controller_actions for x in self._results]
+
+        return None
 
     def main_continue(self, root_node: PriorityTreeNode, current_node: PriorityTreeNode, current_result: CrowPlanningResult3) -> List[Tuple[CrowControllerApplier, ...]]:
         self._queue = PriorityQueue()
@@ -402,6 +461,13 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
             queue_node = _QueueNode(child_node).compute_priority(self.priority_fn_impl)
             self._queue.put(queue_node, priority=queue_node.priority)
 
+        if is_new_node:
+            if isinstance(stmt, ScopedCrowExpression):
+                inner_stmt, inner_scope_id = stmt.statement, stmt.scope_id
+                if isinstance(inner_stmt, CrowBehaviorEffectApplicationExpression):
+                    assert parent_node is not None
+                    child_node.data.result.scopes[inner_scope_id]['__parent_effect_application__'] = weakref.ref(parent_node)
+
         if not is_new_node:
             if stmt is None:
                 stmt, scope_id = None, -1
@@ -457,15 +523,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         elif isinstance(stmt, MRProgram):
             self._push_node(parent_node, PriorityTreeNodeData(child_result, tuple(), stmt.middle, stmt.right, parent_node.data.minimize), None)
         elif isinstance(stmt, CrowBehaviorCommit):
-            for child_result in self._handle_commit_statement(child_result, stmt, scope_id):
-                if stmt.execution:
-                    new_scopes = child_result.scopes.copy()
-                    new_scopes[scope_id]['__commit_execution__'] = TensorValue.from_scalar(True)
-                    new_result = child_result.clone(scopes=new_scopes)
-                    self._maybe_commit_result(new_result, scope_id, parent_node)
-                    self._push_node_result(parent_node, new_result)
-                else:
-                    self._push_node_result(parent_node, child_result)
+            self._handle_commit_statement(parent_node, child_result, stmt, scope_id)
         elif isinstance(stmt, CrowAchieveExpression):
             self._handle_result_achieve_statement(parent_node, child_result, stmt, scope_id)
         elif isinstance(stmt, CrowBehaviorApplicationExpression):
@@ -487,11 +545,26 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         else:
             raise ValueError(f'Invalid statement type for dfs_inner: {stmt}.')
 
-    def _handle_commit_statement(self, result: CrowPlanningResult3, stmt: CrowBehaviorCommit, scope_id: int) -> List[CrowPlanningResult3]:
+    def _handle_commit_statement_inner(self, result: CrowPlanningResult3, stmt: CrowBehaviorCommit, scope_id: int) -> Iterator[CrowPlanningResult3]:
         if stmt.csp:
             yield from self._solve_csp(result)
         else:
             yield result
+
+    def _handle_commit_statement(self, parent_node: PriorityTreeNode, result: CrowPlanningResult3, stmt: CrowBehaviorCommit, scope_id: int) -> Iterator[CrowPlanningResult3]:
+        for child_result in self._handle_commit_statement_inner(result, stmt, scope_id):
+            if stmt.execution:
+                sequential_program, upper_parent_node = _get_sequential_program_from_commit(parent_node, result, stmt, scope_id)
+                effect_application_operator = sequential_program[-1]
+                effect_application_statement, effect_scope_id = effect_application_operator.statement, effect_application_operator.scope_id
+                assert isinstance(effect_application_statement, CrowBehaviorEffectApplicationExpression) and scope_id == effect_scope_id
+                for new_result in self._handle_behavior_effect_application(result, effect_application_statement, effect_scope_id, commit_operator=stmt):
+                    new_result = new_result.clone(
+                        controller_actions=new_result.controller_actions + (PriorityTreeNodeData.from_sequential_program(result, sequential_program, minimize=parent_node.data.minimize), ),
+                    )
+                    self._push_node_result(upper_parent_node, new_result)
+            else:
+                self._push_node_result(parent_node, child_result)
 
     def _maybe_commit_result(self, result: CrowPlanningResult3, scope_id: int, parent_node: PriorityTreeNode) -> None:
         if len(result.controller_actions) == 0:
@@ -634,7 +707,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         # NB(Jiayuan Mao @ 2024/05/31): The input `scope_id` is the scope where the statement (the matched behavior) is being applied.
         new_scope_id = result.latest_scope + 1
         new_scopes = result.scopes.copy()
-        new_scopes[new_scope_id] = _init_scope_from(_resolve_bounded_variables(behavior_match.bounded_variables, result.scopes[scope_id]), scope_id, result.scopes[scope_id])
+        new_scopes[new_scope_id] = _init_scope_from(_resolve_bounded_variables(behavior_match.bounded_variables, result.scopes[scope_id]), scope_id, result.scopes[scope_id], parent_node=parent_node)
         program = behavior_match.behavior.assign_body_program_scope(new_scope_id)
         L_prime, M_prime, R_prime = program.split_preamble_and_promotable()
 
@@ -650,12 +723,14 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         )
 
         L_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in L_prime) if L_prime is not None else tuple()
-        if behavior_match.behavior.always:
-            L_prime = (ScopedCrowExpression(CrowBehaviorCommit.execution_only(), new_scope_id), ) + L_prime
+        # if behavior_match.behavior.always:
+        #     L_prime = (ScopedCrowExpression(CrowBehaviorCommit.execution_only(), new_scope_id), ) + L_prime
         M_prime = CrowBehaviorOrderingSuite.make_sequential(M_prime, variable_scope_identifier=new_scope_id) if M_prime is not None else None
         R_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in R_prime)
 
-        if not behavior_match.behavior.effect_body.is_empty():
+        # Even if the effect body is empty, we still need to add an effect application expression because there might be side effects in those commit statements.
+        # if not behavior_match.behavior.effect_body.is_empty():
+        if True:
             R_prime += (ScopedCrowExpression(CrowBehaviorEffectApplicationExpression(behavior_match.behavior), new_scope_id),)
 
         # Add assert to L_prime that the goal is achieved.
@@ -674,8 +749,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         data = parent_node.data
         new_scope_id = data.result.latest_scope + 1
         new_scopes = data.result.scopes.copy()
-        new_scopes[new_scope_id] = _init_scope_from(_resolve_bounded_variables(behavior_match.bounded_variables, data.result.scopes[scope_id]), scope_id, data.result.scopes[scope_id])
-        new_scopes[new_scope_id]['__parent__'] = scope_id
+        new_scopes[new_scope_id] = _init_scope_from(_resolve_bounded_variables(behavior_match.bounded_variables, data.result.scopes[scope_id]), scope_id, data.result.scopes[scope_id], parent_node=parent_node)
 
         program = behavior_match.behavior.assign_body_program_scope(new_scope_id)
         L_prime, M_prime, R_prime = program.split_preamble_and_promotable()
@@ -693,8 +767,8 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         )
 
         L_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in L_prime) if L_prime is not None else tuple()
-        if behavior_match.behavior.always:
-            L_prime = (ScopedCrowExpression(CrowBehaviorCommit.execution_only(), new_scope_id), ) + L_prime
+        # if behavior_match.behavior.always:
+        #     L_prime = (ScopedCrowExpression(CrowBehaviorCommit.execution_only(), new_scope_id), ) + L_prime
         if M_prime is not None:
             if middle_program is not None:
                 M_prime = CrowBehaviorOrderingSuite.make_unordered(middle_program, CrowBehaviorOrderingSuite.make_sequential(M_prime, variable_scope_identifier=new_scope_id))
@@ -703,7 +777,10 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         else:
             M_prime = middle_program
         R_prime = tuple(ScopedCrowExpression(x, new_scope_id) for x in R_prime)
-        if not behavior_match.behavior.effect_body.is_empty():
+
+        # Even if the effect body is empty, we still need to add an effect application expression because there might be side effects in those commit statements.
+        # if not behavior_match.behavior.effect_body.is_empty():
+        if True:
             R_prime += (ScopedCrowExpression(CrowBehaviorEffectApplicationExpression(behavior_match.behavior), new_scope_id),)
 
         if isinstance(derived_from_stmt, CrowAchieveExpression) and derived_from_stmt.once == False:
@@ -738,7 +815,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         accumulated_programs = list()
         for index in range(len(objects)):
             new_scope_id = new_scope_id + 1
-            new_scopes[new_scope_id] = _init_scope_from(new_scopes[scope_id].copy(), scope_id, new_scopes[scope_id], copy_commit=True)
+            new_scopes[new_scope_id] = _init_scope_from(new_scopes[scope_id].copy(), scope_id, new_scopes[scope_id], copy_commit=True, parent_node=parent_node)
 
             is_object = False
             if isinstance(objects[index], StateObjectReference):
@@ -887,7 +964,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
 
     def _handle_behavior_effect_application(
         self, result: CrowPlanningResult3, effect: Union[CrowBehaviorEffectApplicationExpression, CrowControllerApplicationExpression], scope_id: Optional[int],
-        argument_values: Optional[List[Any]] = None
+        argument_values: Optional[List[Any]] = None, commit_operator: Optional[CrowBehaviorCommit] = None
     ) -> Iterator[CrowPlanningResult3]:
         if self.verbose:
             if isinstance(effect, CrowBehaviorEffectApplicationExpression):
@@ -901,7 +978,7 @@ class CrowRegressionPlannerPriorityTreev1(CrowRegressionPlanner):
         new_csp = result.csp.clone()
 
         if isinstance(effect, CrowBehaviorEffectApplicationExpression):
-            new_data = execute_behavior_effect_body(self.executor, effect.behavior, state=result.state, csp=new_csp, scope=result.scopes[scope_id], state_index=result.get_state_index())
+            new_data = execute_behavior_effect_body(self.executor, effect.behavior, state=result.state, csp=new_csp, scope=result.scopes[scope_id], state_index=result.get_state_index(), commit_operator=commit_operator)
             effect_applier = CrowEffectApplier(effect.behavior.effect_body.statements, result.scopes[scope_id])
         elif isinstance(effect, CrowControllerApplicationExpression):
             scope = {x.name: y for x, y in zip(effect.controller.arguments, argument_values)}
@@ -1038,11 +1115,32 @@ def _resolve_bounded_variables(bounded_variables: Dict[str, Any], scope: Dict[st
     return bounded_variables
 
 
-def _init_scope_from(scope: Dict[str, Any], parent_scope_id: int, parent_scope: Dict[str, Any], copy_commit: bool = False, overwrite_commit: Optional[bool] = None) -> Dict[str, Any]:
+def _init_scope_from(scope: Dict[str, Any], parent_scope_id: int, parent_scope: Dict[str, Any], copy_commit: bool = False, overwrite_commit: Optional[bool] = None, parent_node: Optional[PriorityTreeNode] = None) -> Dict[str, Any]:
     scope['__parent__'] = TensorValue.from_scalar(parent_scope_id)
+    scope['__parent_node__'] = weakref.ref(parent_node) if parent_node is not None else None
     if overwrite_commit is not None:
         scope['__commit_execution__'] = TensorValue.from_scalar(overwrite_commit)
     else:
         scope['__commit_execution__'] = TensorValue.from_scalar(parent_scope['__commit_execution__'] if copy_commit else False)
     return scope
+
+
+#  sequential_program = get_sequential_program_from_commit(parent_node, result, stmt, scope_id)
+def _get_sequential_program_from_commit(parent_node: PriorityTreeNode, result: CrowPlanningResult3, stmt: CrowBehaviorCommit, scope_id: int) -> List[Union[ScopedCrowExpression, MRProgram]]:
+    effect_application_node = result.scopes[scope_id]['__parent_effect_application__']()
+
+    def dfs(x: PriorityTreeNode):
+        if x == effect_application_node:
+            return []
+        for edge, y in x.parents:
+            res = dfs(y)
+            if res is not None:
+                return [edge] + res if edge is not None else res
+
+        return None
+
+    res = dfs(parent_node)
+    if res is None:
+        raise ValueError(f'Cannot find the effect application node {effect_application_node} in the parent node {parent_node}.')
+    return res, effect_application_node
 

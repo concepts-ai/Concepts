@@ -382,6 +382,54 @@ class PlacementParameter(NamedTuple):
     support_normal: np.ndarray
 
 
+def gen_placement_parameter_simple(
+    planning_world: PlanningWorldInterface,
+    target_id: int, support_id: int,
+    *,
+    retain_target_orientation: bool = False,
+    batch_size: int = 100, max_attempts: int = 10000,
+    placement_tol: float = 0.03, support_dir_tol: float = 30,
+    np_random: Optional[np.random.RandomState] = None,
+    verbose: bool = False
+) -> Iterator[PlacementParameter]:
+    """Sample a placement of the target object on the support object.
+
+    Args:
+        planning_world: the planning world.
+        robot: the robot interface.
+        target_id: the id of the target object.
+        support_id: the id of the support object.
+        retain_target_orientation: if True, the target object will be placed with the same orientation as the current one.
+        batch_size: the number of samples in batch processing.
+        max_attempts: the maximum number of attempts for sampling.
+        placement_tol: the tolerance for the placement. To check collision, we will place the object at a position that is `placement_tol` away from the support surface and check for collision.
+        support_dir_tol: the tolerance for the support direction. We will sample the placement direction such that the support direction is within `support_dir_tol` degree from the gravity direction.
+        np_random: the random state.
+        verbose: whether to print the sampling information.
+
+    Yields:
+        the placement parameters.
+    """
+    if np_random is None:
+        np_random = np.random
+
+    target_mesh = planning_world.get_object_mesh(target_id)
+    support_mesh = planning_world.get_object_mesh(support_id)
+    current_target_pos, current_target_quat = planning_world.get_object_pose(target_id)
+
+    nr_batches = int(max_attempts / batch_size)
+    for _ in range(nr_batches):
+        support_points = np.asarray(support_mesh.vertices)
+        rv = PlacementParameter(
+            object_id=target_id,
+            support_id=support_id,
+            target_pos=support_points[np_random.randint(0, len(support_points))],
+            target_quat=current_target_quat,
+            support_normal=np.array([0,0,1])
+        )
+        yield rv
+
+
 def gen_placement_parameter(
     planning_world: PlanningWorldInterface,
     target_id: int, support_id: int,

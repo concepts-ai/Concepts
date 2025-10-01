@@ -1,0 +1,42 @@
+problem "blocksworld-commit"
+domain "__empty__"
+
+# This domain is a modified version that tests the new commit feature.
+
+typedef block: object
+
+feature [[state]] clear(x: block)
+feature [[state]] on(x: block, y: block)
+feature [[state]] holding(x: block)
+feature [[state]] handempty()
+
+controller pickup(x: block, y: block)
+controller place(x: block, y: block)
+
+behavior place_on(x: block, y: block):
+  goal: on(x, y)
+  body:
+    commit with:
+      foreach z: block:
+        on[z, x] = False
+        on[z, y] = False
+        on[x, z] = False
+      on[x, y] = True
+    place(x, y)
+  eff:
+    on[x, y] = True
+
+objects:
+  A, B, C: block
+  Table: block
+
+init:
+  on[A, Table] = True
+  on[B, Table] = True
+  on[C, Table] = True
+
+behavior __goal__():
+  body:
+    unordered:
+      achieve on(A, B)
+      achieve on(B, C)

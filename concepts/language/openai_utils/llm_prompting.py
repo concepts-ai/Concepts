@@ -9,7 +9,7 @@
 # Distributed under terms of the MIT license.
 
 from typing import Optional, List
-from concepts.language.openai_utils.default_client import get_default_client, get_default_chat_model
+from concepts.language.openai_utils.default_client import get_default_model_family, get_default_client, get_default_chat_model
 from concepts.language.openai_utils.llm_prompting_utils import auto_retry, extract_tag
 
 
@@ -37,16 +37,31 @@ def simple_llm_prompt(
         The generated prompt.
     """
 
+    client_family = get_default_model_family()
     client = get_default_client()
-    response = client.chat.completions.create(
-        model=model if model is not None else get_default_chat_model(),
-        messages=[
-            {'role': 'system', 'content': system_instruction},
-            *[{'role': 'user', 'content': p} for p in user_prompts],
-            *([{'role': 'user', 'content': task_prompt}] if task_prompt is not None else [])
-        ],
-        max_tokens=max_tokens
-    )
+
+    if client_family == 'openai':
+        response = client.chat.completions.create(
+            model=model if model is not None else get_default_chat_model(),
+            messages=[
+                {'role': 'system', 'content': system_instruction},
+                *[{'role': 'user', 'content': p} for p in user_prompts],
+                *([{'role': 'user', 'content': task_prompt}] if task_prompt is not None else [])
+            ],
+            max_tokens=max_tokens
+        )
+    elif client_family == 'anthropic':
+        response = client.messages.create(
+            model=model if model is not None else get_default_chat_model(),
+            system = system_instruction,
+            messages=[
+                *[{'role': 'user', 'content': p} for p in user_prompts],
+                *([{'role': 'user', 'content': task_prompt}] if task_prompt is not None else [])
+            ],
+            max_tokens=max_tokens
+        )
+    else:
+        raise ValueError(f"Unsupported model family: {client_family}")
 
     if tag is None:
         return {'response': response}

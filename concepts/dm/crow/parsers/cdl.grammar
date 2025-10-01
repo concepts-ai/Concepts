@@ -115,12 +115,14 @@ suite: simple_stmt | _NEWLINE _INDENT stmt+ _DEDENT
 ?compound_stmt: if_stmt | bind_stmt | mem_query_stmt
               | ordered_suite
               | foreach_stmt | foreach_in_stmt | while_stmt
+              | commit_with_suite
               // | compound_achieve_once_stmt | compound_achieve_hold_stmt | compound_untrack_stmt | compound_assert_once_stmt | compound_assert_hold_stmt | compound_return_stmt
               // | compound_expr_stmt
               // | compound_assign_stmt
 
 ordered_suite: ordering_op ":" suite
 !ordering_op: "sequential" | "unordered" | "promotable" | "promotable" "unordered" | "promotable" "sequential" | "preamble" | "critical" | "critical" "unordered" | "critical" "sequential" | "alternative"
+commit_with_suite: "commit" [_LLSQB decorator_kwargs _RRSQB] "with" ":" suite
 
 expr_stmt: test
          | test ("," test)+ ","?  -> tuple

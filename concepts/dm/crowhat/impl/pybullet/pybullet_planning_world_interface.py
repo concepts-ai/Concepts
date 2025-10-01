@@ -118,7 +118,7 @@ class PyBulletPlanningWorldInterface(PlanningWorldInterface):
             if (body_a, link_a, body_b, link_b) in self._ignored_collision_pairs or (body_b, link_b, body_a, link_a) in self._ignored_collision_pairs:
                 continue
 
-            if -x.max_penetration > max_distance:
+            if max_distance is not None and -x.max_penetration > max_distance:
                 continue
 
             geometric_contacts.append(GeometricContactInfo(
